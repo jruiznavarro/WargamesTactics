@@ -1,0 +1,107 @@
+package phase
+
+import "github.com/jruiznavarro/wargamestactics/internal/game/command"
+
+// PhaseType identifies each phase in a battle round.
+type PhaseType string
+
+const (
+	PhaseHero        PhaseType = "Hero Phase"
+	PhaseMovement    PhaseType = "Movement Phase"
+	PhaseCharging    PhaseType = "Charge Phase"
+	PhaseShooting    PhaseType = "Shooting Phase"
+	PhaseCombat      PhaseType = "Combat Phase"
+	PhaseBattleshock PhaseType = "Battleshock Phase"
+)
+
+// Phase defines the interface for a game phase.
+type Phase struct {
+	Type            PhaseType
+	AllowedCommands []command.CommandType
+}
+
+// NewHeroPhase creates the hero phase.
+func NewHeroPhase() Phase {
+	return Phase{
+		Type: PhaseHero,
+		AllowedCommands: []command.CommandType{
+			command.CommandTypeEndPhase,
+		},
+	}
+}
+
+// NewMovementPhase creates the movement phase.
+func NewMovementPhase() Phase {
+	return Phase{
+		Type: PhaseMovement,
+		AllowedCommands: []command.CommandType{
+			command.CommandTypeMove,
+			command.CommandTypeEndPhase,
+		},
+	}
+}
+
+// NewShootingPhase creates the shooting phase.
+func NewShootingPhase() Phase {
+	return Phase{
+		Type: PhaseShooting,
+		AllowedCommands: []command.CommandType{
+			command.CommandTypeShoot,
+			command.CommandTypeEndPhase,
+		},
+	}
+}
+
+// NewChargePhase creates the charge phase.
+func NewChargePhase() Phase {
+	return Phase{
+		Type: PhaseCharging,
+		AllowedCommands: []command.CommandType{
+			command.CommandTypeCharge,
+			command.CommandTypeEndPhase,
+		},
+	}
+}
+
+// NewCombatPhase creates the combat phase.
+func NewCombatPhase() Phase {
+	return Phase{
+		Type: PhaseCombat,
+		AllowedCommands: []command.CommandType{
+			command.CommandTypeFight,
+			command.CommandTypeEndPhase,
+		},
+	}
+}
+
+// NewBattleshockPhase creates the battleshock phase.
+func NewBattleshockPhase() Phase {
+	return Phase{
+		Type: PhaseBattleshock,
+		AllowedCommands: []command.CommandType{
+			command.CommandTypeEndPhase,
+		},
+	}
+}
+
+// StandardTurnSequence returns the standard 6-phase turn sequence.
+func StandardTurnSequence() []Phase {
+	return []Phase{
+		NewHeroPhase(),
+		NewMovementPhase(),
+		NewShootingPhase(),
+		NewChargePhase(),
+		NewCombatPhase(),
+		NewBattleshockPhase(),
+	}
+}
+
+// IsCommandAllowed checks if a command type is allowed in this phase.
+func (p Phase) IsCommandAllowed(ct command.CommandType) bool {
+	for _, allowed := range p.AllowedCommands {
+		if allowed == ct {
+			return true
+		}
+	}
+	return false
+}
