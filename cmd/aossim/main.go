@@ -55,15 +55,24 @@ func main() {
 	g.RunGame(*rounds)
 
 	// Print log
-	fmt.Println("\n=== Game Log ===")
+	fmt.Println()
+	fmt.Println("+============================================================+")
+	fmt.Println("|                       BATTLE LOG                           |")
+	fmt.Println("+============================================================+")
 	for _, entry := range g.Log {
 		fmt.Println(entry)
 	}
+	fmt.Println("+============================================================+")
 
 	if g.Winner >= 0 {
-		fmt.Printf("\nWinner: Player %d\n", g.Winner)
+		for _, p := range g.Players {
+			if p.ID() == g.Winner {
+				fmt.Printf("\n  VICTORY: %s (Player %d) wins!\n\n", p.Name(), g.Winner)
+				break
+			}
+		}
 	} else {
-		fmt.Println("\nGame ended in a draw.")
+		fmt.Println("\n  DRAW: No winner after all battle rounds.")
 	}
 }
 

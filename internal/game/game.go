@@ -157,6 +157,22 @@ func (g *Game) Logf(format string, args ...interface{}) {
 	g.Log = append(g.Log, msg)
 }
 
+// logCombatResult logs a visual representation of a combat resolution.
+func (g *Game) logCombatResult(attackerName, defenderName string, r CombatResult) {
+	g.Logf("    %s -> %s [%s]", attackerName, defenderName, r.WeaponName)
+	g.Logf("      %d attacks --(hit)--> %d --(wound)--> %d --(save)--> %d unsaved",
+		r.TotalAttacks, r.Hits, r.Wounds, r.SavesFailed)
+	if r.DamageDealt > 0 {
+		slainStr := ""
+		if r.ModelsSlain > 0 {
+			slainStr = fmt.Sprintf("  (%d models slain)", r.ModelsSlain)
+		}
+		g.Logf("      => %d damage dealt%s", r.DamageDealt, slainStr)
+	} else {
+		g.Logf("      => No damage")
+	}
+}
+
 // ExecuteCommand validates and executes a command against the game state.
 func (g *Game) ExecuteCommand(cmd interface{}) (command.Result, error) {
 	switch c := cmd.(type) {
@@ -249,11 +265,10 @@ func (g *Game) executeShoot(cmd *command.ShootCommand) (command.Result, error) {
 	for _, r := range results {
 		totalDamage += r.DamageDealt
 		totalSlain += r.ModelsSlain
-		g.Logf("  %s", r.String())
+		g.logCombatResult(shooter.Name, target.Name, r)
 	}
 
 	desc := fmt.Sprintf("%s shot at %s: %d damage, %d models slain", shooter.Name, target.Name, totalDamage, totalSlain)
-	g.Logf("%s", desc)
 	return command.Result{Description: desc, Success: true}, nil
 }
 
@@ -293,11 +308,10 @@ func (g *Game) executeFight(cmd *command.FightCommand) (command.Result, error) {
 	for _, r := range results {
 		totalDamage += r.DamageDealt
 		totalSlain += r.ModelsSlain
-		g.Logf("  %s", r.String())
+		g.logCombatResult(attacker.Name, target.Name, r)
 	}
 
 	desc := fmt.Sprintf("%s fought %s: %d damage, %d models slain", attacker.Name, target.Name, totalDamage, totalSlain)
-	g.Logf("%s", desc)
 	return command.Result{Description: desc, Success: true}, nil
 }
 
