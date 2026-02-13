@@ -379,65 +379,102 @@ func (g *Game) CheckVictory() {
 	}
 }
 
+// rollOffPriority rolls a die for each player and returns the player indices
+// in activation order: [first, second]. The winner of the roll-off chooses
+// who goes first (we assume the winner always picks themselves).
+// On a tie, re-roll.
+func (g *Game) rollOffPriority() (first, second int) {
+	for {
+		roll0 := g.Roller.RollD6()
+		roll1 := g.Roller.RollD6()
+		g.Logf("Priority roll: %s rolled %d, %s rolled %d",
+			g.Players[0].Name(), roll0, g.Players[1].Name(), roll1)
+
+		if roll0 > roll1 {
+			g.Logf("%s wins priority and chooses to go first", g.Players[0].Name())
+			return 0, 1
+		} else if roll1 > roll0 {
+			g.Logf("%s wins priority and chooses to go first", g.Players[1].Name())
+			return 1, 0
+		}
+		g.Logf("Tie! Re-rolling priority...")
+	}
+}
+
+// runPlayerTurn executes all 6 phases for a single player.
+func (g *Game) runPlayerTurn(playerIdx int) {
+	phases := phase.StandardTurnSequence()
+	player := g.Players[playerIdx]
+
+	g.ActivePlayer = playerIdx
+	g.Logf("--- %s's Turn ---", player.Name())
+
+	for _, p := range phases {
+		if g.IsOver {
+			return
+		}
+
+		g.CurrentPhase = p.Type
+		g.Logf("  -- %s --", p.Type)
+
+		// Reset per-phase flags (shooting, fighting) at the start of each phase
+		// Movement resets at start of turn, not per phase
+
+		for {
+			view := g.View(player.ID())
+			cmd := player.GetNextCommand(view, p)
+
+			if cmd == nil {
+				break
+			}
+
+			if _, ok := cmd.(*command.EndPhaseCommand); ok {
+				break
+			}
+
+			result, err := g.ExecuteCommand(cmd)
+			if err != nil {
+				g.Logf("  Error: %s", err.Error())
+				continue
+			}
+			g.Logf("  %s", result.String())
+
+			g.CheckVictory()
+			if g.IsOver {
+				return
+			}
+		}
+	}
+}
+
 // RunGame executes the main game loop for a given number of battle rounds.
+// Each round: roll-off for priority, then first player does all 6 phases,
+// then second player does all 6 phases.
 func (g *Game) RunGame(maxRounds int) {
 	if len(g.Players) < 2 {
 		g.Logf("Need at least 2 players to start a game")
 		return
 	}
 
-	phases := phase.StandardTurnSequence()
-
 	for round := 1; round <= maxRounds; round++ {
 		g.BattleRound = round
-		g.ResetTurnFlags()
 		g.Logf("=== BATTLE ROUND %d ===", round)
 
-		for _, p := range phases {
-			if g.IsOver {
-				return
-			}
+		// Priority roll-off: winner chooses who goes first
+		first, second := g.rollOffPriority()
 
-			g.CurrentPhase = p.Type
-			g.Logf("--- %s ---", p.Type)
+		// First player's turn: all 6 phases
+		g.ResetTurnFlags()
+		g.runPlayerTurn(first)
+		if g.IsOver {
+			return
+		}
 
-			// Each player acts in each phase
-			for playerIdx := range g.Players {
-				if g.IsOver {
-					return
-				}
-
-				g.ActivePlayer = playerIdx
-				player := g.Players[playerIdx]
-				g.Logf("Player %d (%s) turn", player.ID(), player.Name())
-
-				// Get commands from player until they end the phase
-				for {
-					view := g.View(player.ID())
-					cmd := player.GetNextCommand(view, p)
-
-					if cmd == nil {
-						break
-					}
-
-					// Check for end phase command
-					if _, ok := cmd.(*command.EndPhaseCommand); ok {
-						break
-					}
-
-					result, err := g.ExecuteCommand(cmd)
-					if err != nil {
-						g.Logf("Error: %s", err.Error())
-						continue
-					}
-					g.Logf("%s", result.String())
-
-					g.CheckVictory()
-					if g.IsOver {
-						return
-					}
-				}
-			}
+		// Second player's turn: all 6 phases
+		g.ResetTurnFlags()
+		g.runPlayerTurn(second)
+		if g.IsOver {
+			return
 		}
 	}
 

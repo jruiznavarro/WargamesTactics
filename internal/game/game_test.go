@@ -287,3 +287,78 @@ func TestRunGame_AIvsAI(t *testing.T) {
 		t.Error("game should be over after max rounds")
 	}
 }
+
+func TestPriorityRollOff(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+
+	first, second := g.rollOffPriority()
+
+	// With seed 42, one of them wins - just verify they're different
+	if first == second {
+		t.Error("first and second player should be different")
+	}
+	if (first != 0 && first != 1) || (second != 0 && second != 1) {
+		t.Errorf("player indices should be 0 or 1, got first=%d second=%d", first, second)
+	}
+}
+
+type phaseRecord struct {
+	playerName string
+	phaseType  phase.PhaseType
+}
+
+// trackingPlayer records each GetNextCommand call, then ends the phase.
+type trackingPlayer struct {
+	id      int
+	name    string
+	records *[]phaseRecord
+}
+
+func (tp *trackingPlayer) ID() int      { return tp.id }
+func (tp *trackingPlayer) Name() string { return tp.name }
+func (tp *trackingPlayer) GetNextCommand(view *GameView, currentPhase phase.Phase) interface{} {
+	*tp.records = append(*tp.records, phaseRecord{tp.name, currentPhase.Type})
+	return &command.EndPhaseCommand{OwnerID: tp.id}
+}
+
+func TestTurnOrder_FirstPlayerCompletesAllPhases(t *testing.T) {
+	var records []phaseRecord
+
+	g := NewGame(42, 48, 24)
+
+	tp1 := &trackingPlayer{id: 1, name: "P1", records: &records}
+	tp2 := &trackingPlayer{id: 2, name: "P2", records: &records}
+	g.AddPlayer(tp1)
+	g.AddPlayer(tp2)
+
+	g.CreateUnit("U1", 1, core.Stats{Wounds: 1}, nil, 1, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("U2", 2, core.Stats{Wounds: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0)
+
+	g.RunGame(1)
+
+	// Verify: all 6 phases for the first player should come before
+	// any phase of the second player
+	if len(records) < 12 {
+		t.Fatalf("expected at least 12 phase records (6 per player), got %d", len(records))
+	}
+
+	firstPlayerName := records[0].playerName
+	// First 6 records should all be the same player
+	for i := 0; i < 6; i++ {
+		if records[i].playerName != firstPlayerName {
+			t.Errorf("record %d: expected %s but got %s (first player should do all 6 phases first)",
+				i, firstPlayerName, records[i].playerName)
+		}
+	}
+	// Next 6 should be the other player
+	for i := 6; i < 12; i++ {
+		if records[i].playerName == firstPlayerName {
+			t.Errorf("record %d: expected other player but got %s again",
+				i, records[i].playerName)
+		}
+	}
+}
