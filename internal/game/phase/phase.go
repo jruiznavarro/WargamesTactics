@@ -18,6 +18,7 @@ const (
 type Phase struct {
 	Type            PhaseType
 	AllowedCommands []command.CommandType
+	Alternating     bool // If true, both players alternate activations (e.g. Combat)
 }
 
 // NewHeroPhase creates the hero phase.
@@ -64,6 +65,8 @@ func NewChargePhase() Phase {
 }
 
 // NewCombatPhase creates the combat phase.
+// Combat is alternating: the priority player picks a unit to fight first,
+// then the other player picks one, and so on.
 func NewCombatPhase() Phase {
 	return Phase{
 		Type: PhaseCombat,
@@ -71,6 +74,7 @@ func NewCombatPhase() Phase {
 			command.CommandTypeFight,
 			command.CommandTypeEndPhase,
 		},
+		Alternating: true,
 	}
 }
 

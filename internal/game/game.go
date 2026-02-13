@@ -13,17 +13,18 @@ import (
 
 // Game holds the entire game state.
 type Game struct {
-	Board        *board.Board
-	Units        map[core.UnitID]*core.Unit
-	Players      []Player
-	Roller       *dice.Roller
-	BattleRound  int
-	CurrentPhase phase.PhaseType
-	ActivePlayer int // Index into Players slice
-	NextUnitID   core.UnitID
-	Log          []string
-	IsOver       bool
-	Winner       int // Player ID of winner, -1 if draw
+	Board          *board.Board
+	Units          map[core.UnitID]*core.Unit
+	Players        []Player
+	Roller         *dice.Roller
+	BattleRound    int
+	CurrentPhase   phase.PhaseType
+	ActivePlayer   int // Index into Players slice
+	PriorityPlayer int // Index of the player who won the priority roll this round
+	NextUnitID     core.UnitID
+	Log            []string
+	IsOver         bool
+	Winner         int // Player ID of winner, -1 if draw
 }
 
 // NewGame creates a new game with the given seed and board dimensions.
@@ -401,12 +402,100 @@ func (g *Game) rollOffPriority() (first, second int) {
 	}
 }
 
-// runPlayerTurn executes all 6 phases for a single player.
+// runPlayerPhase runs a single non-alternating phase for one player.
+// The player issues commands until they end the phase.
+func (g *Game) runPlayerPhase(playerIdx int, p phase.Phase) {
+	player := g.Players[playerIdx]
+	g.ActivePlayer = playerIdx
+
+	for {
+		view := g.View(player.ID())
+		cmd := player.GetNextCommand(view, p)
+
+		if cmd == nil {
+			break
+		}
+
+		if _, ok := cmd.(*command.EndPhaseCommand); ok {
+			break
+		}
+
+		result, err := g.ExecuteCommand(cmd)
+		if err != nil {
+			g.Logf("    Error: %s", err.Error())
+			continue
+		}
+		g.Logf("    %s", result.String())
+
+		g.CheckVictory()
+		if g.IsOver {
+			return
+		}
+	}
+}
+
+// runAlternatingPhase runs a phase where both players alternate activations.
+// The active player (whose turn it is) picks first, then the other player,
+// and so on until both pass consecutively.
+func (g *Game) runAlternatingPhase(turnPlayerIdx int, p phase.Phase) {
+	otherIdx := 1 - turnPlayerIdx
+
+	// The active player (whose turn it is) picks first
+	order := [2]int{turnPlayerIdx, otherIdx}
+	passed := [2]bool{false, false}
+
+	for {
+		if g.IsOver {
+			return
+		}
+		if passed[0] && passed[1] {
+			break
+		}
+
+		for i := 0; i < 2; i++ {
+			if passed[i] || g.IsOver {
+				continue
+			}
+
+			playerIdx := order[i]
+			player := g.Players[playerIdx]
+			g.ActivePlayer = playerIdx
+
+			view := g.View(player.ID())
+			cmd := player.GetNextCommand(view, p)
+
+			if cmd == nil {
+				passed[i] = true
+				continue
+			}
+
+			if _, ok := cmd.(*command.EndPhaseCommand); ok {
+				passed[i] = true
+				continue
+			}
+
+			result, err := g.ExecuteCommand(cmd)
+			if err != nil {
+				g.Logf("    Error: %s", err.Error())
+				continue
+			}
+			g.Logf("    %s", result.String())
+
+			g.CheckVictory()
+			if g.IsOver {
+				return
+			}
+		}
+	}
+}
+
+// runPlayerTurn executes all 6 phases for a single player's turn.
+// Most phases are exclusive to the active player. Alternating phases
+// (Combat) have both players taking turns picking units.
 func (g *Game) runPlayerTurn(playerIdx int) {
 	phases := phase.StandardTurnSequence()
 	player := g.Players[playerIdx]
 
-	g.ActivePlayer = playerIdx
 	g.Logf("--- %s's Turn ---", player.Name())
 
 	for _, p := range phases {
@@ -417,39 +506,17 @@ func (g *Game) runPlayerTurn(playerIdx int) {
 		g.CurrentPhase = p.Type
 		g.Logf("  -- %s --", p.Type)
 
-		// Reset per-phase flags (shooting, fighting) at the start of each phase
-		// Movement resets at start of turn, not per phase
-
-		for {
-			view := g.View(player.ID())
-			cmd := player.GetNextCommand(view, p)
-
-			if cmd == nil {
-				break
-			}
-
-			if _, ok := cmd.(*command.EndPhaseCommand); ok {
-				break
-			}
-
-			result, err := g.ExecuteCommand(cmd)
-			if err != nil {
-				g.Logf("  Error: %s", err.Error())
-				continue
-			}
-			g.Logf("  %s", result.String())
-
-			g.CheckVictory()
-			if g.IsOver {
-				return
-			}
+		if p.Alternating {
+			g.runAlternatingPhase(playerIdx, p)
+		} else {
+			g.runPlayerPhase(playerIdx, p)
 		}
 	}
 }
 
 // RunGame executes the main game loop for a given number of battle rounds.
-// Each round: roll-off for priority, then first player does all 6 phases,
-// then second player does all 6 phases.
+// Each round: roll-off for priority, then first player does all 6 phases
+// (with Combat being alternating), then second player does the same.
 func (g *Game) RunGame(maxRounds int) {
 	if len(g.Players) < 2 {
 		g.Logf("Need at least 2 players to start a game")
@@ -462,6 +529,7 @@ func (g *Game) RunGame(maxRounds int) {
 
 		// Priority roll-off: winner chooses who goes first
 		first, second := g.rollOffPriority()
+		g.PriorityPlayer = first
 
 		// First player's turn: all 6 phases
 		g.ResetTurnFlags()
