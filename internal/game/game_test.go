@@ -340,25 +340,87 @@ func TestTurnOrder_FirstPlayerCompletesAllPhases(t *testing.T) {
 
 	g.RunGame(1)
 
-	// Verify: all 6 phases for the first player should come before
-	// any phase of the second player
-	if len(records) < 12 {
-		t.Fatalf("expected at least 12 phase records (6 per player), got %d", len(records))
+	// With alternating combat, the first player's turn produces:
+	// 5 solo phases (Hero, Movement, Shooting, Charge, Battleshock) for first player
+	// + 2 combat records (first player then second player, both end immediately)
+	// Then the second player's turn produces the same pattern.
+	// Total: at least 14 records.
+
+	if len(records) < 14 {
+		t.Fatalf("expected at least 14 phase records, got %d", len(records))
 	}
 
 	firstPlayerName := records[0].playerName
-	// First 6 records should all be the same player
-	for i := 0; i < 6; i++ {
-		if records[i].playerName != firstPlayerName {
-			t.Errorf("record %d: expected %s but got %s (first player should do all 6 phases first)",
-				i, firstPlayerName, records[i].playerName)
+
+	// Verify first player's turn: first 5 non-combat phases must be the first player
+	nonCombatCount := 0
+	for _, r := range records {
+		if r.phaseType != phase.PhaseCombat {
+			if nonCombatCount < 5 {
+				if r.playerName != firstPlayerName {
+					t.Errorf("non-combat phase %d during first turn: expected %s but got %s",
+						nonCombatCount, firstPlayerName, r.playerName)
+				}
+			}
+			nonCombatCount++
 		}
 	}
-	// Next 6 should be the other player
-	for i := 6; i < 12; i++ {
-		if records[i].playerName == firstPlayerName {
-			t.Errorf("record %d: expected other player but got %s again",
-				i, records[i].playerName)
+
+	// Verify second player's turn non-combat phases are the other player
+	secondPlayerNonCombatStart := 5
+	nonCombatCount = 0
+	for _, r := range records {
+		if r.phaseType != phase.PhaseCombat {
+			if nonCombatCount >= secondPlayerNonCombatStart && nonCombatCount < secondPlayerNonCombatStart+5 {
+				if r.playerName == firstPlayerName {
+					t.Errorf("non-combat phase %d during second turn: expected other player but got %s",
+						nonCombatCount, r.playerName)
+				}
+			}
+			nonCombatCount++
 		}
+	}
+}
+
+func TestCombatPhase_AlternatingActivation(t *testing.T) {
+	var records []phaseRecord
+
+	g := NewGame(42, 48, 24)
+
+	tp1 := &trackingPlayer{id: 1, name: "P1", records: &records}
+	tp2 := &trackingPlayer{id: 2, name: "P2", records: &records}
+	g.AddPlayer(tp1)
+	g.AddPlayer(tp2)
+
+	g.CreateUnit("U1", 1, core.Stats{Wounds: 1}, nil, 1, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("U2", 2, core.Stats{Wounds: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0)
+
+	g.RunGame(1)
+
+	// Collect only combat phase records
+	var combatRecords []phaseRecord
+	for _, r := range records {
+		if r.phaseType == phase.PhaseCombat {
+			combatRecords = append(combatRecords, r)
+		}
+	}
+
+	// Each combat phase should have both players participating
+	// (tracking players end immediately, so we get one record per player per combat phase)
+	// There are 2 combat phases per round (one in each player's turn)
+	if len(combatRecords) < 4 {
+		t.Fatalf("expected at least 4 combat records (2 players x 2 turns), got %d", len(combatRecords))
+	}
+
+	// In each combat phase, both players should appear
+	// First combat phase (first player's turn): first player picks first
+	firstPlayerName := records[0].playerName // whoever won priority
+	if combatRecords[0].playerName != firstPlayerName {
+		t.Errorf("first combat activation should be %s (active player), got %s",
+			firstPlayerName, combatRecords[0].playerName)
+	}
+	if combatRecords[1].playerName == combatRecords[0].playerName {
+		t.Errorf("second combat activation should be the other player, got %s again",
+			combatRecords[1].playerName)
 	}
 }
