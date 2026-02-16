@@ -9,6 +9,7 @@ import (
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/phase"
+	"github.com/jruiznavarro/wargamestactics/internal/game/rules"
 	"github.com/jruiznavarro/wargamestactics/pkg/dice"
 )
 
@@ -18,6 +19,7 @@ type Game struct {
 	Units          map[core.UnitID]*core.Unit
 	Players        []Player
 	Roller         *dice.Roller
+	Rules          *rules.Engine
 	BattleRound    int
 	CurrentPhase   phase.PhaseType
 	ActivePlayer   int // Index into Players slice
@@ -34,6 +36,7 @@ func NewGame(seed int64, boardWidth, boardHeight float64) *Game {
 		Board:      board.NewBoard(boardWidth, boardHeight),
 		Units:      make(map[core.UnitID]*core.Unit),
 		Roller:     dice.NewRoller(seed),
+		Rules:      rules.NewEngine(),
 		NextUnitID: 1,
 		Winner:     -1,
 	}
@@ -214,10 +217,27 @@ func (g *Game) executeMove(cmd *command.MoveCommand) (command.Result, error) {
 
 	origin := unit.Position()
 	dist := core.Distance(origin, cmd.Destination)
-	maxMove := float64(unit.Stats.Move)
+
+	// Evaluate movement rules
+	moveCtx := &rules.Context{
+		Attacker:    unit,
+		Origin:      origin,
+		Destination: cmd.Destination,
+		Distance:    dist,
+	}
+	g.Rules.Evaluate(rules.BeforeMove, moveCtx)
+
+	if moveCtx.Blocked {
+		return command.Result{}, fmt.Errorf("move blocked: %s", moveCtx.BlockMessage)
+	}
+
+	maxMove := float64(unit.Stats.Move + moveCtx.Modifiers.MoveMod)
+	if maxMove < 0 {
+		maxMove = 0
+	}
 
 	if !board.MoveDistanceValid(origin, cmd.Destination, maxMove) {
-		return command.Result{}, fmt.Errorf("move distance %.1f exceeds maximum %d", dist, unit.Stats.Move)
+		return command.Result{}, fmt.Errorf("move distance %.1f exceeds maximum %.0f", dist, maxMove)
 	}
 
 	// Move all alive models to destination (simplified: whole unit moves as one)
@@ -255,15 +275,27 @@ func (g *Game) executeShoot(cmd *command.ShootCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("unit %d has no ranged weapons", cmd.ShooterID)
 	}
 
-	// Check range for each ranged weapon
+	// Evaluate shooting rules
 	dist := core.Distance(shooter.Position(), target.Position())
+	shootCtx := &rules.Context{
+		Attacker: shooter,
+		Defender: target,
+		Distance: dist,
+	}
+	g.Rules.Evaluate(rules.BeforeShoot, shootCtx)
+
+	if shootCtx.Blocked {
+		return command.Result{}, fmt.Errorf("shooting blocked: %s", shootCtx.BlockMessage)
+	}
+
+	// Check range for each ranged weapon
 	for _, idx := range shooter.RangedWeapons() {
 		if dist > float64(shooter.Weapons[idx].Range) {
 			return command.Result{}, fmt.Errorf("target is out of range (%.1f\" > %d\")", dist, shooter.Weapons[idx].Range)
 		}
 	}
 
-	results := ResolveShooting(g.Roller, shooter, target)
+	results := ResolveShooting(g.Roller, g.Rules, shooter, target)
 	shooter.HasShot = true
 
 	totalDamage := 0
@@ -306,7 +338,7 @@ func (g *Game) executeFight(cmd *command.FightCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("target is out of melee range (%.1f\" > 3\")", dist)
 	}
 
-	results := ResolveCombat(g.Roller, attacker, target)
+	results := ResolveCombat(g.Roller, g.Rules, attacker, target)
 	attacker.HasFought = true
 
 	totalDamage := 0
@@ -347,8 +379,22 @@ func (g *Game) executeCharge(cmd *command.ChargeCommand) (command.Result, error)
 		return command.Result{}, fmt.Errorf("target is too far to charge (%.1f\" > 12\")", dist)
 	}
 
-	// Roll 2D6 for charge distance
-	chargeRoll := g.Roller.Roll2D6()
+	// Evaluate charge rules
+	chargeCtx := &rules.Context{
+		Attacker: charger,
+		Defender: target,
+		Origin:   charger.Position(),
+		Distance: dist,
+	}
+	g.Rules.Evaluate(rules.BeforeCharge, chargeCtx)
+
+	if chargeCtx.Blocked {
+		charger.HasCharged = true
+		return command.Result{}, fmt.Errorf("charge blocked: %s", chargeCtx.BlockMessage)
+	}
+
+	// Roll 2D6 for charge distance (+ any modifiers from rules)
+	chargeRoll := g.Roller.Roll2D6() + chargeCtx.Modifiers.ChargeMod
 	g.Logf("Charge roll: %d", chargeRoll)
 
 	if float64(chargeRoll) < dist {
@@ -527,8 +573,22 @@ func (g *Game) executePileIn(cmd *command.PileInCommand) (command.Result, error)
 	origin := unit.Position()
 	distBefore := core.Distance(origin, enemyPos)
 
-	// Move up to 3" toward nearest enemy
-	pileInDist := 3.0
+	// Evaluate pile-in rules
+	pileInCtx := &rules.Context{
+		Attacker:    unit,
+		Origin:      origin,
+		Destination: enemyPos,
+		Distance:    distBefore,
+	}
+	g.Rules.Evaluate(rules.BeforePileIn, pileInCtx)
+
+	if pileInCtx.Blocked {
+		unit.HasPiledIn = true
+		return command.Result{Description: fmt.Sprintf("%s: pile-in blocked: %s", unit.Name, pileInCtx.BlockMessage), Success: false}, nil
+	}
+
+	// Move up to 3" toward nearest enemy (+ any pile-in modifier)
+	pileInDist := 3.0 + float64(pileInCtx.Modifiers.PileInMod)
 	if distBefore <= pileInDist {
 		// Already very close, move to within 0.5"
 		pileInDist = distBefore - 0.5

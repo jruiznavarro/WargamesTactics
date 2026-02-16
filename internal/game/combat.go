@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
+	"github.com/jruiznavarro/wargamestactics/internal/game/rules"
 	"github.com/jruiznavarro/wargamestactics/pkg/dice"
 )
 
@@ -29,9 +30,24 @@ func (r CombatResult) String() string {
 
 // ResolveAttacks resolves the full attack sequence for one weapon profile:
 // hit rolls -> wound rolls -> save rolls -> damage allocation.
-func ResolveAttacks(roller *dice.Roller, attacker *core.Unit, defender *core.Unit, weapon *core.Weapon) CombatResult {
+// The rules engine is consulted at each step for modifiers.
+func ResolveAttacks(roller *dice.Roller, engine *rules.Engine, attacker *core.Unit, defender *core.Unit, weapon *core.Weapon) CombatResult {
 	aliveModelsBefore := defender.AliveModels()
-	totalAttacks := attacker.AliveModels() * weapon.Attacks
+	baseAttacks := attacker.AliveModels() * weapon.Attacks
+
+	// Build base context for this weapon resolution
+	baseCtx := &rules.Context{
+		Attacker: attacker,
+		Defender: defender,
+		Weapon:   weapon,
+	}
+
+	// Step 0: Attack count modifiers
+	engine.Evaluate(rules.BeforeAttackCount, baseCtx)
+	totalAttacks := baseAttacks + baseCtx.Modifiers.AttacksMod
+	if totalAttacks < 0 {
+		totalAttacks = 0
+	}
 
 	result := CombatResult{
 		AttackerID:   attacker.ID,
@@ -40,23 +56,47 @@ func ResolveAttacks(roller *dice.Roller, attacker *core.Unit, defender *core.Uni
 		TotalAttacks: totalAttacks,
 	}
 
-	// Step 1: Hit rolls
-	hits := rollHits(roller, totalAttacks, weapon.ToHit)
+	// Step 1: Hit rolls (evaluate modifiers)
+	hitCtx := &rules.Context{Attacker: attacker, Defender: defender, Weapon: weapon}
+	engine.Evaluate(rules.BeforeHitRoll, hitCtx)
+	hits := rollHits(roller, totalAttacks, weapon.ToHit, hitCtx.Modifiers.HitMod)
 	result.Hits = hits
 
-	// Step 2: Wound rolls
-	wounds := rollWounds(roller, hits, weapon.ToWound)
+	// Step 2: Wound rolls (evaluate modifiers)
+	woundCtx := &rules.Context{Attacker: attacker, Defender: defender, Weapon: weapon}
+	engine.Evaluate(rules.BeforeWoundRoll, woundCtx)
+	wounds := rollWounds(roller, hits, weapon.ToWound, woundCtx.Modifiers.WoundMod)
 	result.Wounds = wounds
 
-	// Step 3: Save rolls
+	// Step 3: Save rolls (evaluate modifiers -- cover, etc.)
+	saveCtx := &rules.Context{Attacker: attacker, Defender: defender, Weapon: weapon}
+	engine.Evaluate(rules.BeforeSaveRoll, saveCtx)
 	saveThreshold := defender.Stats.Save - weapon.Rend // Rend is negative, subtracting makes save harder
+	saveThreshold -= saveCtx.Modifiers.SaveMod         // Positive SaveMod = easier save = lower threshold
 	savesFailed := rollSaves(roller, wounds, saveThreshold)
 	result.SavesFailed = savesFailed
 
-	// Step 4: Damage allocation
-	totalDamage := savesFailed * weapon.Damage
+	// Step 4: Damage (evaluate modifiers)
+	dmgCtx := &rules.Context{Attacker: attacker, Defender: defender, Weapon: weapon}
+	engine.Evaluate(rules.BeforeDamage, dmgCtx)
+	damagePerWound := weapon.Damage + dmgCtx.Modifiers.DamageMod
+	if damagePerWound < 1 {
+		damagePerWound = 1
+	}
+	totalDamage := savesFailed * damagePerWound
 	defender.AllocateDamage(totalDamage)
 	result.DamageDealt = totalDamage
+
+	// Apply mortal wounds from rules (bypasses saves)
+	totalMortals := baseCtx.Modifiers.MortalWounds +
+		hitCtx.Modifiers.MortalWounds +
+		woundCtx.Modifiers.MortalWounds +
+		saveCtx.Modifiers.MortalWounds +
+		dmgCtx.Modifiers.MortalWounds
+	if totalMortals > 0 {
+		defender.AllocateDamage(totalMortals)
+		result.DamageDealt += totalMortals
+	}
 
 	result.ModelsSlain = aliveModelsBefore - defender.AliveModels()
 
@@ -71,38 +111,41 @@ func ResolveMortalWounds(defender *core.Unit, mortalWounds int) int {
 }
 
 // ResolveCombat resolves all melee weapon attacks from attacker against defender.
-func ResolveCombat(roller *dice.Roller, attacker *core.Unit, defender *core.Unit) []CombatResult {
+func ResolveCombat(roller *dice.Roller, engine *rules.Engine, attacker *core.Unit, defender *core.Unit) []CombatResult {
 	var results []CombatResult
 	for _, idx := range attacker.MeleeWeapons() {
 		if attacker.IsDestroyed() || defender.IsDestroyed() {
 			break
 		}
-		result := ResolveAttacks(roller, attacker, defender, &attacker.Weapons[idx])
+		result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[idx])
 		results = append(results, result)
 	}
 	return results
 }
 
 // ResolveShooting resolves all ranged weapon attacks from attacker against defender.
-func ResolveShooting(roller *dice.Roller, attacker *core.Unit, defender *core.Unit) []CombatResult {
+func ResolveShooting(roller *dice.Roller, engine *rules.Engine, attacker *core.Unit, defender *core.Unit) []CombatResult {
 	var results []CombatResult
 	for _, idx := range attacker.RangedWeapons() {
 		if attacker.IsDestroyed() || defender.IsDestroyed() {
 			break
 		}
-		result := ResolveAttacks(roller, attacker, defender, &attacker.Weapons[idx])
+		result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[idx])
 		results = append(results, result)
 	}
 	return results
 }
 
 // rollHits rolls numAttacks D6s and counts successes (>= toHit).
-// Natural 1 always fails.
-func rollHits(roller *dice.Roller, numAttacks, toHit int) int {
+// Natural 1 always fails. The modifier is added to each roll result.
+func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int) int {
 	hits := 0
 	for i := 0; i < numAttacks; i++ {
-		_, success := roller.RollWithThreshold(toHit)
-		if success {
+		roll := roller.RollD6()
+		if roll == 1 {
+			continue // Natural 1 always fails
+		}
+		if roll+modifier >= toHit {
 			hits++
 		}
 	}
@@ -110,12 +153,15 @@ func rollHits(roller *dice.Roller, numAttacks, toHit int) int {
 }
 
 // rollWounds rolls numHits D6s and counts successes (>= toWound).
-// Natural 1 always fails.
-func rollWounds(roller *dice.Roller, numHits, toWound int) int {
+// Natural 1 always fails. The modifier is added to each roll result.
+func rollWounds(roller *dice.Roller, numHits, toWound, modifier int) int {
 	wounds := 0
 	for i := 0; i < numHits; i++ {
-		_, success := roller.RollWithThreshold(toWound)
-		if success {
+		roll := roller.RollD6()
+		if roll == 1 {
+			continue // Natural 1 always fails
+		}
+		if roll+modifier >= toWound {
 			wounds++
 		}
 	}
@@ -129,12 +175,11 @@ func rollSaves(roller *dice.Roller, numWounds, saveThreshold int) int {
 	failed := 0
 	for i := 0; i < numWounds; i++ {
 		if saveThreshold > 6 {
-			// No possible save
 			failed++
 			continue
 		}
-		_, success := roller.RollWithThreshold(saveThreshold)
-		if !success {
+		roll := roller.RollD6()
+		if roll == 1 || roll < saveThreshold {
 			failed++
 		}
 	}

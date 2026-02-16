@@ -4,8 +4,13 @@ import (
 	"testing"
 
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
+	"github.com/jruiznavarro/wargamestactics/internal/game/rules"
 	"github.com/jruiznavarro/wargamestactics/pkg/dice"
 )
+
+func newTestEngine() *rules.Engine {
+	return rules.NewEngine()
+}
 
 func newTestAttacker() *core.Unit {
 	return &core.Unit{
@@ -44,12 +49,12 @@ func newTestDefender() *core.Unit {
 
 func TestResolveAttacks_Deterministic(t *testing.T) {
 	roller := dice.NewRoller(42)
+	engine := newTestEngine()
 	attacker := newTestAttacker()
 	defender := newTestDefender()
 
-	result := ResolveAttacks(roller, attacker, defender, &attacker.Weapons[0])
+	result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0])
 
-	// With seed 42, we should get consistent results
 	if result.TotalAttacks != 3 {
 		t.Errorf("expected 3 attacks, got %d", result.TotalAttacks)
 	}
@@ -65,10 +70,11 @@ func TestResolveAttacks_Deterministic(t *testing.T) {
 
 	// Run again with same seed - should get same result
 	roller2 := dice.NewRoller(42)
+	engine2 := newTestEngine()
 	attacker2 := newTestAttacker()
 	defender2 := newTestDefender()
 
-	result2 := ResolveAttacks(roller2, attacker2, defender2, &attacker2.Weapons[0])
+	result2 := ResolveAttacks(roller2, engine2, attacker2, defender2, &attacker2.Weapons[0])
 
 	if result.Hits != result2.Hits || result.Wounds != result2.Wounds ||
 		result.SavesFailed != result2.SavesFailed || result.DamageDealt != result2.DamageDealt {
@@ -77,9 +83,8 @@ func TestResolveAttacks_Deterministic(t *testing.T) {
 }
 
 func TestResolveAttacks_DamageAllocation(t *testing.T) {
-	// Use a seed that we know produces hits
-	// We'll run with many attacks to ensure some damage goes through
 	roller := dice.NewRoller(100)
+	engine := newTestEngine()
 
 	attacker := &core.Unit{
 		ID: 1,
@@ -99,10 +104,8 @@ func TestResolveAttacks_DamageAllocation(t *testing.T) {
 		},
 	}
 
-	result := ResolveAttacks(roller, attacker, defender, &attacker.Weapons[0])
+	result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0])
 
-	// With 20 attacks hitting on 2+, wounding on 2+, and save of 9+ (impossible),
-	// we should get significant damage
 	if result.DamageDealt == 0 {
 		t.Error("expected some damage to be dealt")
 	}
@@ -134,6 +137,7 @@ func TestResolveMortalWounds(t *testing.T) {
 
 func TestResolveCombat_OnlyMeleeWeapons(t *testing.T) {
 	roller := dice.NewRoller(42)
+	engine := newTestEngine()
 
 	attacker := &core.Unit{
 		ID: 1,
@@ -153,9 +157,8 @@ func TestResolveCombat_OnlyMeleeWeapons(t *testing.T) {
 		},
 	}
 
-	results := ResolveCombat(roller, attacker, defender)
+	results := ResolveCombat(roller, engine, attacker, defender)
 
-	// Should only use melee weapon (Sword), not ranged (Bow)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 weapon result, got %d", len(results))
 	}
@@ -166,6 +169,7 @@ func TestResolveCombat_OnlyMeleeWeapons(t *testing.T) {
 
 func TestResolveShooting_OnlyRangedWeapons(t *testing.T) {
 	roller := dice.NewRoller(42)
+	engine := newTestEngine()
 
 	attacker := &core.Unit{
 		ID: 1,
@@ -185,7 +189,7 @@ func TestResolveShooting_OnlyRangedWeapons(t *testing.T) {
 		},
 	}
 
-	results := ResolveShooting(roller, attacker, defender)
+	results := ResolveShooting(roller, engine, attacker, defender)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 weapon result, got %d", len(results))
@@ -197,6 +201,7 @@ func TestResolveShooting_OnlyRangedWeapons(t *testing.T) {
 
 func TestCombat_DestroyedUnitStopsAttacking(t *testing.T) {
 	roller := dice.NewRoller(42)
+	engine := newTestEngine()
 
 	attacker := &core.Unit{
 		ID: 1,
@@ -209,7 +214,6 @@ func TestCombat_DestroyedUnitStopsAttacking(t *testing.T) {
 		},
 	}
 
-	// Defender with tiny amount of wounds - will die to first weapon
 	defender := &core.Unit{
 		ID:    2,
 		Stats: core.Stats{Save: 6},
@@ -218,18 +222,79 @@ func TestCombat_DestroyedUnitStopsAttacking(t *testing.T) {
 		},
 	}
 
-	results := ResolveCombat(roller, attacker, defender)
+	results := ResolveCombat(roller, engine, attacker, defender)
 
-	// Should have at most 1 result since defender should die from first weapon
 	if len(results) > 1 {
-		// If defender died from first weapon, second weapon shouldn't fire
 		for i := 1; i < len(results); i++ {
 			if results[i].TotalAttacks > 0 && results[i].Hits > 0 {
-				// This is fine - defender was already dead, combat should have stopped
+				// Defender was already dead, combat should have stopped
 			}
 		}
 	}
 	if !defender.IsDestroyed() {
 		t.Error("defender should be destroyed")
+	}
+}
+
+func TestResolveAttacks_WithRuleModifiers(t *testing.T) {
+	roller := dice.NewRoller(42)
+	engine := rules.NewEngine()
+
+	// Add cover rule: +1 to save (makes it easier = lower threshold)
+	engine.AddRule(rules.Rule{
+		Name:    "Cover",
+		Trigger: rules.BeforeSaveRoll,
+		Source:  rules.SourceTerrain,
+		Apply: func(ctx *rules.Context) {
+			ctx.Modifiers.SaveMod += 1
+		},
+	})
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "Test", Attacks: 100, ToHit: 2, ToWound: 2, Rend: 0, Damage: 1},
+		},
+	}
+	defender := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 4},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 100, MaxWounds: 100, IsAlive: true},
+		},
+	}
+
+	resultWithCover := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0])
+
+	// With cover (+1 save), the effective save is 3+ instead of 4+
+	// so fewer saves should fail compared to without cover
+	roller2 := dice.NewRoller(42)
+	engine2 := rules.NewEngine() // no cover
+	attacker2 := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "Test", Attacks: 100, ToHit: 2, ToWound: 2, Rend: 0, Damage: 1},
+		},
+	}
+	defender2 := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 4},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 100, MaxWounds: 100, IsAlive: true},
+		},
+	}
+
+	resultWithout := ResolveAttacks(roller2, engine2, attacker2, defender2, &attacker2.Weapons[0])
+
+	// Cover should result in less damage
+	if resultWithCover.DamageDealt >= resultWithout.DamageDealt {
+		t.Errorf("cover should reduce damage: with=%d without=%d",
+			resultWithCover.DamageDealt, resultWithout.DamageDealt)
 	}
 }

@@ -4,8 +4,9 @@ import "github.com/jruiznavarro/wargamestactics/internal/game/core"
 
 // Board represents the battlefield.
 type Board struct {
-	Width  float64 // Width in inches
-	Height float64 // Height in inches
+	Width   float64           // Width in inches
+	Height  float64           // Height in inches
+	Terrain []*TerrainFeature // Terrain features on the board
 }
 
 // NewBoard creates a new board with the given dimensions.
@@ -14,6 +15,41 @@ func NewBoard(width, height float64) *Board {
 		Width:  width,
 		Height: height,
 	}
+}
+
+// AddTerrain adds a terrain feature to the board and returns it.
+func (b *Board) AddTerrain(name string, terrainType TerrainType, pos core.Position, width, height float64) *TerrainFeature {
+	t := &TerrainFeature{
+		ID:     len(b.Terrain) + 1,
+		Name:   name,
+		Type:   terrainType,
+		Pos:    pos,
+		Width:  width,
+		Height: height,
+	}
+	b.Terrain = append(b.Terrain, t)
+	return t
+}
+
+// TerrainAt returns all terrain features that contain the given position.
+func (b *Board) TerrainAt(pos core.Position) []*TerrainFeature {
+	var result []*TerrainFeature
+	for _, t := range b.Terrain {
+		if t.Contains(pos) {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+// HasTerrainType checks if any terrain of the given type exists at a position.
+func (b *Board) HasTerrainType(pos core.Position, terrainType TerrainType) bool {
+	for _, t := range b.Terrain {
+		if t.Type == terrainType && t.Contains(pos) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsInBounds checks if a position is within the board boundaries.
