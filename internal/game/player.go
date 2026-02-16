@@ -2,6 +2,7 @@ package game
 
 import (
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
+	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/phase"
 )
 
@@ -39,10 +40,13 @@ type UnitView struct {
 	MoveSpeed     int
 	Save          int
 	Weapons       []WeaponView
+	StrikeOrder   core.StrikeOrder
 	HasMoved      bool
 	HasShot       bool
 	HasFought     bool
 	HasCharged    bool
+	HasPiledIn    bool
+	IsEngaged     bool
 }
 
 // WeaponView is a read-only view of a weapon.

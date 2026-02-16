@@ -191,6 +191,12 @@ func (p *CLIPlayer) displayUnitCard(u game.UnitView, showDetails bool) {
 	if u.HasCharged {
 		flags = append(flags, "CHARGED")
 	}
+	if u.HasPiledIn {
+		flags = append(flags, "PILED-IN")
+	}
+	if u.IsEngaged {
+		flags = append(flags, "ENGAGED")
+	}
 	statusStr := ""
 	if len(flags) > 0 {
 		statusStr = " [" + strings.Join(flags, ",") + "]"
@@ -231,6 +237,8 @@ func (p *CLIPlayer) displayPrompt(currentPhase phase.Phase) {
 			fmt.Fprintf(p.writer, " move <id> <x> <y>")
 		case command.CommandTypeShoot:
 			fmt.Fprintf(p.writer, " shoot <id> <target>")
+		case command.CommandTypePileIn:
+			fmt.Fprintf(p.writer, " pilein <id>")
 		case command.CommandTypeFight:
 			fmt.Fprintf(p.writer, " fight <id> <target>")
 		case command.CommandTypeCharge:
@@ -339,6 +347,22 @@ func (p *CLIPlayer) parseCommand(line string, currentPhase phase.Phase, view *ga
 			TargetID:  core.UnitID(targetID),
 		}, nil
 
+	case "pilein":
+		if !currentPhase.IsCommandAllowed(command.CommandTypePileIn) {
+			return nil, fmt.Errorf("pile-in not allowed in %s", currentPhase.Type)
+		}
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("usage: pilein <unit_id>")
+		}
+		unitID, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid unit ID: %s", parts[1])
+		}
+		return &command.PileInCommand{
+			OwnerID: p.id,
+			UnitID:  core.UnitID(unitID),
+		}, nil
+
 	case "skip", "end", "done":
 		return &command.EndPhaseCommand{OwnerID: p.id}, nil
 
@@ -350,6 +374,7 @@ func (p *CLIPlayer) parseCommand(line string, currentPhase phase.Phase, view *ga
 		fmt.Fprintf(p.writer, "\n  Available commands:\n")
 		fmt.Fprintf(p.writer, "    move <unit_id> <x> <y>      Move unit to position\n")
 		fmt.Fprintf(p.writer, "    shoot <unit_id> <target_id>  Shoot at enemy unit\n")
+		fmt.Fprintf(p.writer, "    pilein <unit_id>             Pile in 3\" toward enemy\n")
 		fmt.Fprintf(p.writer, "    fight <unit_id> <target_id>  Melee attack enemy unit\n")
 		fmt.Fprintf(p.writer, "    charge <unit_id> <target_id> Declare a charge\n")
 		fmt.Fprintf(p.writer, "    skip                         End current phase\n")

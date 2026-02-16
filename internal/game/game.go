@@ -3,6 +3,7 @@ package game
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/jruiznavarro/wargamestactics/internal/game/board"
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
@@ -133,10 +134,13 @@ func (g *Game) View(playerID int) *GameView {
 			MoveSpeed:     u.Stats.Move,
 			Save:          u.Stats.Save,
 			Weapons:       weaponViews,
+			StrikeOrder:   u.StrikeOrder,
 			HasMoved:      u.HasMoved,
 			HasShot:       u.HasShot,
 			HasFought:     u.HasFought,
 			HasCharged:    u.HasCharged,
+			HasPiledIn:    u.HasPiledIn,
+			IsEngaged:     g.isEngaged(u),
 		}
 		unitsByOwner[u.OwnerID] = append(unitsByOwner[u.OwnerID], view)
 	}
@@ -184,6 +188,8 @@ func (g *Game) ExecuteCommand(cmd interface{}) (command.Result, error) {
 		return g.executeFight(c)
 	case *command.ChargeCommand:
 		return g.executeCharge(c)
+	case *command.PileInCommand:
+		return g.executePileIn(c)
 	case *command.EndPhaseCommand:
 		return command.Result{Description: "Phase ended", Success: true}, nil
 	default:
@@ -448,58 +454,304 @@ func (g *Game) runPlayerPhase(playerIdx int, p phase.Phase) {
 	}
 }
 
-// runAlternatingPhase runs a phase where both players alternate activations.
-// The active player (whose turn it is) picks first, then the other player,
-// and so on until both pass consecutively.
-func (g *Game) runAlternatingPhase(turnPlayerIdx int, p phase.Phase) {
-	otherIdx := 1 - turnPlayerIdx
+// engagedUnits returns all non-destroyed units for a player that are within
+// 3" engagement range of at least one enemy unit and haven't fought yet.
+func (g *Game) engagedUnits(playerID int, strikeOrder core.StrikeOrder) []*core.Unit {
+	var result []*core.Unit
+	for _, u := range g.Units {
+		if u.OwnerID != playerID || u.IsDestroyed() || u.HasFought {
+			continue
+		}
+		if u.StrikeOrder != strikeOrder {
+			continue
+		}
+		if g.isEngaged(u) {
+			result = append(result, u)
+		}
+	}
+	return result
+}
 
-	// The active player (whose turn it is) picks first
-	order := [2]int{turnPlayerIdx, otherIdx}
-	passed := [2]bool{false, false}
+// isEngaged returns true if the unit is within 3" of any enemy unit.
+func (g *Game) isEngaged(u *core.Unit) bool {
+	for _, other := range g.Units {
+		if other.OwnerID == u.OwnerID || other.IsDestroyed() {
+			continue
+		}
+		if core.Distance(u.Position(), other.Position()) <= 3.0 {
+			return true
+		}
+	}
+	return false
+}
+
+// nearestEnemyPos returns the position of the closest enemy unit to u.
+func (g *Game) nearestEnemyPos(u *core.Unit) (core.Position, bool) {
+	bestDist := math.MaxFloat64
+	var bestPos core.Position
+	found := false
+	for _, other := range g.Units {
+		if other.OwnerID == u.OwnerID || other.IsDestroyed() {
+			continue
+		}
+		d := core.Distance(u.Position(), other.Position())
+		if d < bestDist {
+			bestDist = d
+			bestPos = other.Position()
+			found = true
+		}
+	}
+	return bestPos, found
+}
+
+// executePileIn moves a unit up to 3" but it must end closer to the
+// nearest enemy model than where it started.
+func (g *Game) executePileIn(cmd *command.PileInCommand) (command.Result, error) {
+	unit := g.GetUnit(cmd.UnitID)
+	if unit == nil {
+		return command.Result{}, fmt.Errorf("unit %d not found", cmd.UnitID)
+	}
+	if unit.OwnerID != cmd.OwnerID {
+		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.UnitID, cmd.OwnerID)
+	}
+	if unit.HasPiledIn {
+		return command.Result{}, fmt.Errorf("unit %d has already piled in", cmd.UnitID)
+	}
+
+	enemyPos, found := g.nearestEnemyPos(unit)
+	if !found {
+		unit.HasPiledIn = true
+		return command.Result{Description: fmt.Sprintf("%s: no enemy to pile in to", unit.Name), Success: true}, nil
+	}
+
+	origin := unit.Position()
+	distBefore := core.Distance(origin, enemyPos)
+
+	// Move up to 3" toward nearest enemy
+	pileInDist := 3.0
+	if distBefore <= pileInDist {
+		// Already very close, move to within 0.5"
+		pileInDist = distBefore - 0.5
+		if pileInDist < 0 {
+			pileInDist = 0
+		}
+	}
+
+	if pileInDist <= 0 {
+		unit.HasPiledIn = true
+		return command.Result{Description: fmt.Sprintf("%s: already in base contact", unit.Name), Success: true}, nil
+	}
+
+	newPos := origin.Towards(enemyPos, pileInDist)
+	distAfter := core.Distance(newPos, enemyPos)
+
+	// Must end closer to the nearest enemy
+	if distAfter >= distBefore {
+		unit.HasPiledIn = true
+		return command.Result{Description: fmt.Sprintf("%s: cannot pile in closer", unit.Name), Success: true}, nil
+	}
+
+	for i := range unit.Models {
+		if unit.Models[i].IsAlive {
+			unit.Models[i].Position = newPos
+		}
+	}
+	unit.HasPiledIn = true
+
+	moved := core.Distance(origin, newPos)
+	desc := fmt.Sprintf("%s piled in %.1f\" toward enemy", unit.Name, moved)
+	g.Logf("    %s", desc)
+	return command.Result{Description: desc, Success: true}, nil
+}
+
+// runCombatSubPhase runs one sub-phase of combat (strike-first, normal, or strike-last).
+// Both players alternate activations. The priority player picks first.
+// Each activation: pile-in -> fight. Units in engagement range must fight.
+func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p phase.Phase) {
+	otherIdx := 1 - turnPlayerIdx
+	playerOrder := [2]int{turnPlayerIdx, otherIdx}
 
 	for {
 		if g.IsOver {
 			return
 		}
-		if passed[0] && passed[1] {
-			break
-		}
+
+		// Check which players still have eligible units
+		anyActivated := false
 
 		for i := 0; i < 2; i++ {
-			if passed[i] || g.IsOver {
+			if g.IsOver {
+				return
+			}
+
+			playerIdx := playerOrder[i]
+			player := g.Players[playerIdx]
+			eligible := g.engagedUnits(player.ID(), order)
+
+			if len(eligible) == 0 {
 				continue
 			}
 
-			playerIdx := order[i]
-			player := g.Players[playerIdx]
 			g.ActivePlayer = playerIdx
 
+			// Let the player choose which unit to activate
 			view := g.View(player.ID())
 			cmd := player.GetNextCommand(view, p)
 
 			if cmd == nil {
-				passed[i] = true
 				continue
 			}
 
 			if _, ok := cmd.(*command.EndPhaseCommand); ok {
-				passed[i] = true
+				// Player passes this activation, but if they have engaged units
+				// they'll need to fight eventually. For now, auto-fight the first eligible.
+				g.autoFightUnit(eligible[0])
+				anyActivated = true
 				continue
 			}
 
+			// Handle pile-in command
+			if pileCmd, ok := cmd.(*command.PileInCommand); ok {
+				result, err := g.executePileIn(pileCmd)
+				if err != nil {
+					g.Logf("    Error: %s", err.Error())
+				} else {
+					g.Logf("    %s", result.String())
+				}
+				// After pile-in the player still needs to fight - auto-fight
+				unit := g.GetUnit(pileCmd.UnitID)
+				if unit != nil && !unit.HasFought && !unit.IsDestroyed() {
+					g.autoFightUnit(unit)
+				}
+				anyActivated = true
+				continue
+			}
+
+			// Handle fight command (player may skip pile-in)
+			if fightCmd, ok := cmd.(*command.FightCommand); ok {
+				// Auto pile-in first if not done
+				unit := g.GetUnit(fightCmd.AttackerID)
+				if unit != nil && !unit.HasPiledIn {
+					g.executePileIn(&command.PileInCommand{
+						OwnerID: fightCmd.OwnerID,
+						UnitID:  fightCmd.AttackerID,
+					})
+				}
+				result, err := g.ExecuteCommand(cmd)
+				if err != nil {
+					g.Logf("    Error: %s", err.Error())
+				} else {
+					g.Logf("    %s", result.String())
+				}
+				anyActivated = true
+
+				g.CheckVictory()
+				continue
+			}
+
+			// Any other command in combat phase
 			result, err := g.ExecuteCommand(cmd)
 			if err != nil {
 				g.Logf("    Error: %s", err.Error())
-				continue
+			} else {
+				g.Logf("    %s", result.String())
 			}
-			g.Logf("    %s", result.String())
+			anyActivated = true
 
 			g.CheckVictory()
-			if g.IsOver {
-				return
+		}
+
+		if !anyActivated {
+			break
+		}
+	}
+}
+
+// autoFightUnit performs a pile-in and fight for a unit automatically,
+// targeting the nearest enemy in melee range.
+func (g *Game) autoFightUnit(unit *core.Unit) {
+	if unit.IsDestroyed() || unit.HasFought {
+		return
+	}
+
+	// Pile-in if not done yet
+	if !unit.HasPiledIn {
+		g.executePileIn(&command.PileInCommand{
+			OwnerID: unit.OwnerID,
+			UnitID:  unit.ID,
+		})
+	}
+
+	// Find nearest enemy within 3"
+	var bestTarget *core.Unit
+	bestDist := math.MaxFloat64
+	for _, other := range g.Units {
+		if other.OwnerID == unit.OwnerID || other.IsDestroyed() {
+			continue
+		}
+		d := core.Distance(unit.Position(), other.Position())
+		if d <= 3.0 && d < bestDist {
+			bestDist = d
+			bestTarget = other
+		}
+	}
+
+	if bestTarget == nil || len(unit.MeleeWeapons()) == 0 {
+		unit.HasFought = true
+		return
+	}
+
+	fightCmd := &command.FightCommand{
+		OwnerID:    unit.OwnerID,
+		AttackerID: unit.ID,
+		TargetID:   bestTarget.ID,
+	}
+	result, err := g.ExecuteCommand(fightCmd)
+	if err != nil {
+		g.Logf("    Error: %s", err.Error())
+	} else {
+		g.Logf("    %s", result.String())
+	}
+	g.CheckVictory()
+}
+
+// runAlternatingPhase runs the combat phase with 3 sub-phases:
+// 1. Strike-first units (both players alternate, priority player first)
+// 2. Normal units (both players alternate, priority player first)
+// 3. Strike-last units (both players alternate, priority player first)
+// Units in engagement range (3") must fight.
+func (g *Game) runAlternatingPhase(turnPlayerIdx int, p phase.Phase) {
+	subPhases := []struct {
+		order core.StrikeOrder
+		label string
+	}{
+		{core.StrikeFirst, "Strike First"},
+		{core.StrikeNormal, ""},
+		{core.StrikeLast, "Strike Last"},
+	}
+
+	for _, sp := range subPhases {
+		if g.IsOver {
+			return
+		}
+
+		// Check if any units exist for this sub-phase
+		hasUnits := false
+		for _, player := range g.Players {
+			if len(g.engagedUnits(player.ID(), sp.order)) > 0 {
+				hasUnits = true
+				break
 			}
 		}
+		if !hasUnits {
+			continue
+		}
+
+		if sp.label != "" {
+			g.Logf("    [%s]", sp.label)
+		}
+
+		g.runCombatSubPhase(turnPlayerIdx, sp.order, p)
 	}
 }
 

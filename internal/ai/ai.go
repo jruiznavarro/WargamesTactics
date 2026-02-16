@@ -155,20 +155,11 @@ func (a *AIPlayer) decideFight(view *game.GameView) interface{} {
 		if u.HasFought {
 			continue
 		}
-
-		// Check if unit has melee weapons
-		hasMelee := false
-		for _, w := range u.Weapons {
-			if w.Range == 0 {
-				hasMelee = true
-				break
-			}
-		}
-		if !hasMelee {
+		if !u.IsEngaged {
 			continue
 		}
 
-		// Fight nearest enemy within 3"
+		// Find nearest enemy within 3" to fight
 		for _, enemy := range enemies {
 			dist := a.distBetween(u, *enemy)
 			if dist <= 3.0 {

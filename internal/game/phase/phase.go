@@ -71,6 +71,7 @@ func NewCombatPhase() Phase {
 	return Phase{
 		Type: PhaseCombat,
 		AllowedCommands: []command.CommandType{
+			command.CommandTypePileIn,
 			command.CommandTypeFight,
 			command.CommandTypeEndPhase,
 		},

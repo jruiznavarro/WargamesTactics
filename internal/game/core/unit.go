@@ -3,6 +3,15 @@ package core
 // UnitID is a unique identifier for a unit.
 type UnitID int
 
+// StrikeOrder determines when a unit fights in the combat phase.
+type StrikeOrder int
+
+const (
+	StrikeNormal StrikeOrder = 0 // Default: fights in the normal sub-phase
+	StrikeFirst  StrikeOrder = 1 // Fights before normal units
+	StrikeLast   StrikeOrder = -1 // Fights after normal units
+)
+
 // Unit represents a group of models fighting together.
 type Unit struct {
 	ID      UnitID
@@ -12,10 +21,13 @@ type Unit struct {
 	Weapons []Weapon
 	OwnerID int // Player ID of the owner
 
+	StrikeOrder StrikeOrder // Determines combat activation priority
+
 	HasMoved   bool
 	HasShot    bool
 	HasFought  bool
 	HasCharged bool
+	HasPiledIn bool
 }
 
 // Position returns the position of the unit leader (first alive model).
@@ -91,6 +103,7 @@ func (u *Unit) ResetPhaseFlags() {
 	u.HasShot = false
 	u.HasFought = false
 	u.HasCharged = false
+	u.HasPiledIn = false
 }
 
 // AllocateDamage distributes damage across models in the unit.

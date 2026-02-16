@@ -10,6 +10,7 @@ const (
 	CommandTypeShoot    CommandType = "shoot"
 	CommandTypeFight    CommandType = "fight"
 	CommandTypeCharge   CommandType = "charge"
+	CommandTypePileIn   CommandType = "pile_in"
 	CommandTypeEndPhase CommandType = "end_phase"
 )
 
