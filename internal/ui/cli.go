@@ -99,6 +99,21 @@ func (p *CLIPlayer) displayMap(view *game.GameView) {
 		}
 	}
 
+	// Paint terrain features onto the grid
+	for _, t := range view.Terrain {
+		x0 := int(math.Round(t.Pos[0] / view.BoardWidth * float64(mapWidth-1)))
+		y0 := int(math.Round(t.Pos[1] / view.BoardHeight * float64(mapHeight-1)))
+		x1 := int(math.Round((t.Pos[0] + t.Width) / view.BoardWidth * float64(mapWidth-1)))
+		y1 := int(math.Round((t.Pos[1] + t.Height) / view.BoardHeight * float64(mapHeight-1)))
+		for gy := y0; gy <= y1; gy++ {
+			for gx := x0; gx <= x1; gx++ {
+				if gx >= 0 && gx < mapWidth && gy >= 0 && gy < mapHeight {
+					grid[gy][gx] = t.Symbol
+				}
+			}
+		}
+	}
+
 	// Collect all units sorted by ID for stable rendering
 	type unitInfo struct {
 		view  game.UnitView
@@ -153,6 +168,12 @@ func (p *CLIPlayer) displayMap(view *game.GameView) {
 			tag = "you"
 		}
 		fmt.Fprintf(p.writer, " %c=%s(%s)", ui.label, ui.view.Name, tag)
+	}
+	if len(view.Terrain) > 0 {
+		fmt.Fprintf(p.writer, "\n  Terrain:")
+		for _, t := range view.Terrain {
+			fmt.Fprintf(p.writer, " %c=%s(%s)", t.Symbol, t.Name, t.Type)
+		}
 	}
 	fmt.Fprintf(p.writer, "\n")
 }

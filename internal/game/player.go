@@ -17,9 +17,20 @@ type Player interface {
 	Name() string
 }
 
+// TerrainView is a read-only view of a terrain feature.
+type TerrainView struct {
+	Name   string
+	Type   string     // "Obstacle", "Woods", "Ruins", "Impassable", "Open"
+	Symbol rune
+	Pos    [2]float64 // Top-left X, Y
+	Width  float64
+	Height float64
+}
+
 // GameView provides a read-only snapshot of the game state for a specific player.
 type GameView struct {
 	Units        map[int][]UnitView // Units by owner player ID
+	Terrain      []TerrainView
 	BoardWidth   float64
 	BoardHeight  float64
 	CurrentPhase phase.PhaseType

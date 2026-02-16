@@ -48,6 +48,14 @@ func (g *Game) AddPlayer(p Player) int {
 	return len(g.Players) - 1
 }
 
+// RegisterTerrainRules generates rules from all terrain on the board and
+// registers them in the rules engine. Call after placing all terrain.
+func (g *Game) RegisterTerrainRules() {
+	for _, r := range board.TerrainRules(g.Board) {
+		g.Rules.AddRule(r)
+	}
+}
+
 // CreateUnit creates a new unit with the given parameters and adds it to the game.
 func (g *Game) CreateUnit(name string, ownerID int, stats core.Stats, weapons []core.Weapon, numModels int, position core.Position, baseSize float64) *core.Unit {
 	id := g.NextUnitID
@@ -148,8 +156,21 @@ func (g *Game) View(playerID int) *GameView {
 		unitsByOwner[u.OwnerID] = append(unitsByOwner[u.OwnerID], view)
 	}
 
+	var terrainViews []TerrainView
+	for _, t := range g.Board.Terrain {
+		terrainViews = append(terrainViews, TerrainView{
+			Name:   t.Name,
+			Type:   t.Type.String(),
+			Symbol: t.Symbol(),
+			Pos:    [2]float64{t.Pos.X, t.Pos.Y},
+			Width:  t.Width,
+			Height: t.Height,
+		})
+	}
+
 	return &GameView{
 		Units:        unitsByOwner,
+		Terrain:      terrainViews,
 		BoardWidth:   g.Board.Width,
 		BoardHeight:  g.Board.Height,
 		CurrentPhase: g.CurrentPhase,

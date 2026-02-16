@@ -8,6 +8,7 @@ import (
 
 	"github.com/jruiznavarro/wargamestactics/internal/ai"
 	"github.com/jruiznavarro/wargamestactics/internal/game"
+	"github.com/jruiznavarro/wargamestactics/internal/game/board"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/ui"
 )
@@ -48,8 +49,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup example armies
+	// Setup example battlefield and armies
+	setupExampleTerrain(g)
 	setupExampleArmies(g)
+	g.RegisterTerrainRules()
 
 	// Run the game
 	g.RunGame(*rounds)
@@ -74,6 +77,17 @@ func main() {
 	} else {
 		fmt.Println("\n  DRAW: No winner after all battle rounds.")
 	}
+}
+
+func setupExampleTerrain(g *game.Game) {
+	// Center woods — provides cover and slows movement
+	g.Board.AddTerrain("Dark Woods", board.TerrainWoods, core.Position{X: 20, Y: 8}, 8, 8)
+	// Ruins on Player 2's flank — provides cover
+	g.Board.AddTerrain("Old Ruins", board.TerrainRuins, core.Position{X: 34, Y: 2}, 5, 4)
+	// Obstacle wall in the middle-left — ranged cover
+	g.Board.AddTerrain("Stone Wall", board.TerrainObstacle, core.Position{X: 14, Y: 18}, 6, 2)
+	// Lava pit — impassable
+	g.Board.AddTerrain("Lava Pit", board.TerrainImpassable, core.Position{X: 22, Y: 0}, 4, 3)
 }
 
 func setupExampleArmies(g *game.Game) {
