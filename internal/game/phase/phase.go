@@ -10,8 +10,7 @@ const (
 	PhaseMovement    PhaseType = "Movement Phase"
 	PhaseCharging    PhaseType = "Charge Phase"
 	PhaseShooting    PhaseType = "Shooting Phase"
-	PhaseCombat      PhaseType = "Combat Phase"
-	PhaseBattleshock PhaseType = "Battleshock Phase"
+	PhaseCombat PhaseType = "Combat Phase"
 )
 
 // Phase defines the interface for a game phase.
@@ -79,17 +78,7 @@ func NewCombatPhase() Phase {
 	}
 }
 
-// NewBattleshockPhase creates the battleshock phase.
-func NewBattleshockPhase() Phase {
-	return Phase{
-		Type: PhaseBattleshock,
-		AllowedCommands: []command.CommandType{
-			command.CommandTypeEndPhase,
-		},
-	}
-}
-
-// StandardTurnSequence returns the standard 6-phase turn sequence.
+// StandardTurnSequence returns the standard 5-phase turn sequence.
 func StandardTurnSequence() []Phase {
 	return []Phase{
 		NewHeroPhase(),
@@ -97,7 +86,6 @@ func StandardTurnSequence() []Phase {
 		NewShootingPhase(),
 		NewChargePhase(),
 		NewCombatPhase(),
-		NewBattleshockPhase(),
 	}
 }
 

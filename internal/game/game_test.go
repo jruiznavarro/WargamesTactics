@@ -341,20 +341,20 @@ func TestTurnOrder_FirstPlayerCompletesAllPhases(t *testing.T) {
 
 	g.RunGame(1)
 
-	// Each player's turn: 5 non-combat phases (Hero, Movement, Shooting, Charge, Battleshock).
+	// Each player's turn: 4 non-combat phases (Hero, Movement, Shooting, Charge).
 	// Combat phase doesn't prompt because no units are engaged.
-	// Total: 10 records (5 per player).
-	if len(records) < 10 {
-		t.Fatalf("expected at least 10 phase records, got %d", len(records))
+	// Total: 8 records (4 per player).
+	if len(records) < 8 {
+		t.Fatalf("expected at least 8 phase records, got %d", len(records))
 	}
 
 	firstPlayerName := records[0].playerName
 
-	// Verify first player's turn: first 5 non-combat phases must be the first player
+	// Verify first player's turn: first 4 non-combat phases must be the first player
 	nonCombatCount := 0
 	for _, r := range records {
 		if r.phaseType != phase.PhaseCombat {
-			if nonCombatCount < 5 {
+			if nonCombatCount < 4 {
 				if r.playerName != firstPlayerName {
 					t.Errorf("non-combat phase %d during first turn: expected %s but got %s",
 						nonCombatCount, firstPlayerName, r.playerName)
@@ -365,11 +365,11 @@ func TestTurnOrder_FirstPlayerCompletesAllPhases(t *testing.T) {
 	}
 
 	// Verify second player's turn non-combat phases are the other player
-	secondPlayerNonCombatStart := 5
+	secondPlayerNonCombatStart := 4
 	nonCombatCount = 0
 	for _, r := range records {
 		if r.phaseType != phase.PhaseCombat {
-			if nonCombatCount >= secondPlayerNonCombatStart && nonCombatCount < secondPlayerNonCombatStart+5 {
+			if nonCombatCount >= secondPlayerNonCombatStart && nonCombatCount < secondPlayerNonCombatStart+4 {
 				if r.playerName == firstPlayerName {
 					t.Errorf("non-combat phase %d during second turn: expected other player but got %s",
 						nonCombatCount, r.playerName)
