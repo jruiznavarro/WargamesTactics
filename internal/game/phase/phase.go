@@ -10,7 +10,8 @@ const (
 	PhaseMovement    PhaseType = "Movement Phase"
 	PhaseCharging    PhaseType = "Charge Phase"
 	PhaseShooting    PhaseType = "Shooting Phase"
-	PhaseCombat PhaseType = "Combat Phase"
+	PhaseCombat    PhaseType = "Combat Phase"
+	PhaseEndOfTurn PhaseType = "End of Turn"
 )
 
 // Phase defines the interface for a game phase.
@@ -78,7 +79,18 @@ func NewCombatPhase() Phase {
 	}
 }
 
-// StandardTurnSequence returns the standard 5-phase turn sequence.
+// NewEndOfTurnPhase creates the end of turn phase.
+// Used for scoring objectives, triggering end-of-turn abilities, etc.
+func NewEndOfTurnPhase() Phase {
+	return Phase{
+		Type: PhaseEndOfTurn,
+		AllowedCommands: []command.CommandType{
+			command.CommandTypeEndPhase,
+		},
+	}
+}
+
+// StandardTurnSequence returns the standard 6-phase turn sequence.
 func StandardTurnSequence() []Phase {
 	return []Phase{
 		NewHeroPhase(),
@@ -86,6 +98,7 @@ func StandardTurnSequence() []Phase {
 		NewShootingPhase(),
 		NewChargePhase(),
 		NewCombatPhase(),
+		NewEndOfTurnPhase(),
 	}
 }
 
