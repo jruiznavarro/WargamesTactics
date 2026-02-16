@@ -49,15 +49,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup example battlefield and armies
 	setupExampleTerrain(g)
 	setupExampleArmies(g)
 	g.RegisterTerrainRules()
 
-	// Run the game
 	g.RunGame(*rounds)
 
-	// Print log
 	fmt.Println()
 	fmt.Println("+============================================================+")
 	fmt.Println("|                       BATTLE LOG                           |")
@@ -80,63 +77,51 @@ func main() {
 }
 
 func setupExampleTerrain(g *game.Game) {
-	// Center woods — provides cover and slows movement
-	g.Board.AddTerrain("Dark Woods", board.TerrainWoods, core.Position{X: 20, Y: 8}, 8, 8)
-	// Ruins on Player 2's flank — provides cover
-	g.Board.AddTerrain("Old Ruins", board.TerrainRuins, core.Position{X: 34, Y: 2}, 5, 4)
-	// Obstacle wall in the middle-left — ranged cover
-	g.Board.AddTerrain("Stone Wall", board.TerrainObstacle, core.Position{X: 14, Y: 18}, 6, 2)
-	// Lava pit — impassable
+	g.Board.AddTerrain("Dark Woods", board.TerrainObscuring, core.Position{X: 20, Y: 8}, 8, 8)
+	g.Board.AddTerrain("Old Ruins", board.TerrainObstacle, core.Position{X: 34, Y: 2}, 5, 4)
+	g.Board.AddTerrain("Rocky Hill", board.TerrainArea, core.Position{X: 14, Y: 18}, 6, 2)
 	g.Board.AddTerrain("Lava Pit", board.TerrainImpassable, core.Position{X: 22, Y: 0}, 4, 3)
 }
 
 func setupExampleArmies(g *game.Game) {
-	// Player 1: Melee-focused army
-	g.CreateUnit(
-		"Warriors",
-		1,
-		core.Stats{Move: 5, Save: 4, Bravery: 7, Wounds: 1},
+	warriors := g.CreateUnit(
+		"Warriors", 1,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
 		[]core.Weapon{
-			{Name: "Broadsword", Range: 0, Attacks: 2, ToHit: 3, ToWound: 4, Rend: -1, Damage: 1},
+			{Name: "Broadsword", Range: 0, Attacks: 2, ToHit: 3, ToWound: 4, Rend: 1, Damage: 1, Abilities: core.AbilityAntiInfantry},
 		},
-		5,
-		core.Position{X: 12, Y: 12},
-		1.0,
+		5, core.Position{X: 12, Y: 12}, 1.0,
 	)
-	g.CreateUnit(
-		"Knights",
-		1,
-		core.Stats{Move: 10, Save: 3, Bravery: 8, Wounds: 3},
-		[]core.Weapon{
-			{Name: "Lance", Range: 0, Attacks: 3, ToHit: 3, ToWound: 3, Rend: -2, Damage: 2},
-		},
-		3,
-		core.Position{X: 8, Y: 12},
-		1.0,
-	)
+	warriors.Keywords = []core.Keyword{core.KeywordInfantry}
 
-	// Player 2: Ranged + melee army
-	g.CreateUnit(
-		"Bowmen",
-		2,
-		core.Stats{Move: 5, Save: 5, Bravery: 6, Wounds: 1},
+	knights := g.CreateUnit(
+		"Knights", 1,
+		core.Stats{Move: 10, Save: 3, Control: 2, Health: 3},
 		[]core.Weapon{
-			{Name: "Longbow", Range: 24, Attacks: 1, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1},
+			{Name: "Lance", Range: 0, Attacks: 3, ToHit: 3, ToWound: 3, Rend: 2, Damage: 2, Abilities: core.AbilityCharge},
+		},
+		3, core.Position{X: 8, Y: 12}, 1.0,
+	)
+	knights.Keywords = []core.Keyword{core.KeywordCavalry}
+
+	bowmen := g.CreateUnit(
+		"Bowmen", 2,
+		core.Stats{Move: 5, Save: 5, Control: 1, Health: 1},
+		[]core.Weapon{
+			{Name: "Longbow", Range: 24, Attacks: 1, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1, Abilities: core.AbilityCrit2Hits},
 			{Name: "Dagger", Range: 0, Attacks: 1, ToHit: 4, ToWound: 5, Rend: 0, Damage: 1},
 		},
-		5,
-		core.Position{X: 36, Y: 12},
-		1.0,
+		5, core.Position{X: 36, Y: 12}, 1.0,
 	)
-	g.CreateUnit(
-		"Brutes",
-		2,
-		core.Stats{Move: 4, Save: 4, Bravery: 7, Wounds: 3},
+	bowmen.Keywords = []core.Keyword{core.KeywordInfantry}
+
+	brutes := g.CreateUnit(
+		"Brutes", 2,
+		core.Stats{Move: 4, Save: 4, Control: 1, Health: 3},
 		[]core.Weapon{
-			{Name: "Choppa", Range: 0, Attacks: 3, ToHit: 3, ToWound: 3, Rend: -1, Damage: 2},
+			{Name: "Choppa", Range: 0, Attacks: 3, ToHit: 3, ToWound: 3, Rend: 1, Damage: 2, Abilities: core.AbilityCritMortal},
 		},
-		3,
-		core.Position{X: 38, Y: 12},
-		1.0,
+		3, core.Position{X: 38, Y: 12}, 1.0,
 	)
+	brutes.Keywords = []core.Keyword{core.KeywordInfantry}
 }

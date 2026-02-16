@@ -7,6 +7,8 @@ type CommandType string
 
 const (
 	CommandTypeMove     CommandType = "move"
+	CommandTypeRun      CommandType = "run"
+	CommandTypeRetreat  CommandType = "retreat"
 	CommandTypeShoot    CommandType = "shoot"
 	CommandTypeFight    CommandType = "fight"
 	CommandTypeCharge   CommandType = "charge"

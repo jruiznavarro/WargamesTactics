@@ -37,6 +37,8 @@ func NewMovementPhase() Phase {
 		Type: PhaseMovement,
 		AllowedCommands: []command.CommandType{
 			command.CommandTypeMove,
+			command.CommandTypeRun,
+			command.CommandTypeRetreat,
 			command.CommandTypeEndPhase,
 		},
 	}

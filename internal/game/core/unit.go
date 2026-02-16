@@ -7,9 +7,23 @@ type UnitID int
 type StrikeOrder int
 
 const (
-	StrikeNormal StrikeOrder = 0 // Default: fights in the normal sub-phase
-	StrikeFirst  StrikeOrder = 1 // Fights before normal units
+	StrikeNormal StrikeOrder = 0  // Default: fights in the normal sub-phase
+	StrikeFirst  StrikeOrder = 1  // Fights before normal units
 	StrikeLast   StrikeOrder = -1 // Fights after normal units
+)
+
+// Keyword represents a unit keyword for ability targeting.
+type Keyword string
+
+const (
+	KeywordInfantry  Keyword = "Infantry"
+	KeywordCavalry   Keyword = "Cavalry"
+	KeywordHero      Keyword = "Hero"
+	KeywordMonster   Keyword = "Monster"
+	KeywordWarMachine Keyword = "War Machine"
+	KeywordWizard    Keyword = "Wizard"
+	KeywordPriest    Keyword = "Priest"
+	KeywordFly       Keyword = "Fly"
 )
 
 // Unit represents a group of models fighting together.
@@ -21,13 +35,17 @@ type Unit struct {
 	Weapons []Weapon
 	OwnerID int // Player ID of the owner
 
+	Keywords    []Keyword   // Unit keywords (Infantry, Hero, Fly, etc.)
+	WardSave    int         // Ward save value (0 = none, 6 = 6+, 5 = 5+)
 	StrikeOrder StrikeOrder // Determines combat activation priority
 
-	HasMoved   bool
-	HasShot    bool
-	HasFought  bool
-	HasCharged bool
-	HasPiledIn bool
+	HasMoved     bool
+	HasRun       bool
+	HasRetreated bool
+	HasShot      bool
+	HasFought    bool
+	HasCharged   bool
+	HasPiledIn   bool
 }
 
 // Position returns the position of the unit leader (first alive model).
@@ -97,9 +115,21 @@ func (u *Unit) RangedWeapons() []int {
 	return indices
 }
 
+// HasKeyword returns true if the unit has the given keyword.
+func (u *Unit) HasKeyword(k Keyword) bool {
+	for _, kw := range u.Keywords {
+		if kw == k {
+			return true
+		}
+	}
+	return false
+}
+
 // ResetPhaseFlags resets all per-turn action flags.
 func (u *Unit) ResetPhaseFlags() {
 	u.HasMoved = false
+	u.HasRun = false
+	u.HasRetreated = false
 	u.HasShot = false
 	u.HasFought = false
 	u.HasCharged = false

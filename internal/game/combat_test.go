@@ -17,13 +17,13 @@ func newTestAttacker() *core.Unit {
 		ID:   1,
 		Name: "Attackers",
 		Stats: core.Stats{
-			Move: 5, Save: 4, Bravery: 7, Wounds: 1,
+			Move: 5, Save: 4, Control: 1, Health: 1,
 		},
 		Models: []core.Model{
 			{ID: 0, Position: core.Position{X: 10, Y: 10}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
 		},
 		Weapons: []core.Weapon{
-			{Name: "Greatsword", Range: 0, Attacks: 3, ToHit: 3, ToWound: 3, Rend: -1, Damage: 2},
+			{Name: "Greatsword", Range: 0, Attacks: 3, ToHit: 3, ToWound: 3, Rend: 1, Damage: 2},
 		},
 		OwnerID: 1,
 	}
@@ -34,7 +34,7 @@ func newTestDefender() *core.Unit {
 		ID:   2,
 		Name: "Defenders",
 		Stats: core.Stats{
-			Move: 4, Save: 4, Bravery: 6, Wounds: 2,
+			Move: 4, Save: 4, Control: 1, Health: 2,
 		},
 		Models: []core.Model{
 			{ID: 0, Position: core.Position{X: 11, Y: 10}, CurrentWounds: 2, MaxWounds: 2, IsAlive: true},
@@ -53,7 +53,7 @@ func TestResolveAttacks_Deterministic(t *testing.T) {
 	attacker := newTestAttacker()
 	defender := newTestDefender()
 
-	result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0])
+	result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0], false)
 
 	if result.TotalAttacks != 3 {
 		t.Errorf("expected 3 attacks, got %d", result.TotalAttacks)
@@ -74,7 +74,7 @@ func TestResolveAttacks_Deterministic(t *testing.T) {
 	attacker2 := newTestAttacker()
 	defender2 := newTestDefender()
 
-	result2 := ResolveAttacks(roller2, engine2, attacker2, defender2, &attacker2.Weapons[0])
+	result2 := ResolveAttacks(roller2, engine2, attacker2, defender2, &attacker2.Weapons[0], false)
 
 	if result.Hits != result2.Hits || result.Wounds != result2.Wounds ||
 		result.SavesFailed != result2.SavesFailed || result.DamageDealt != result2.DamageDealt {
@@ -92,7 +92,7 @@ func TestResolveAttacks_DamageAllocation(t *testing.T) {
 			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
 		},
 		Weapons: []core.Weapon{
-			{Name: "Test", Attacks: 20, ToHit: 2, ToWound: 2, Rend: -3, Damage: 1},
+			{Name: "Test", Attacks: 20, ToHit: 2, ToWound: 2, Rend: 3, Damage: 1},
 		},
 	}
 	defender := &core.Unit{
@@ -104,7 +104,7 @@ func TestResolveAttacks_DamageAllocation(t *testing.T) {
 		},
 	}
 
-	result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0])
+	result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0], false)
 
 	if result.DamageDealt == 0 {
 		t.Error("expected some damage to be dealt")
@@ -112,6 +112,7 @@ func TestResolveAttacks_DamageAllocation(t *testing.T) {
 }
 
 func TestResolveMortalWounds(t *testing.T) {
+	roller := dice.NewRoller(42)
 	unit := &core.Unit{
 		ID: 1,
 		Models: []core.Model{
@@ -120,7 +121,11 @@ func TestResolveMortalWounds(t *testing.T) {
 		},
 	}
 
-	slain := ResolveMortalWounds(unit, 3)
+	damage, slain := ResolveMortalWounds(roller, unit, 3)
+	// No ward save on this unit, so all 3 mortal wounds go through
+	if damage != 3 {
+		t.Errorf("expected 3 damage from mortal wounds (no ward), got %d", damage)
+	}
 	if slain != 1 {
 		t.Errorf("expected 1 model slain by 3 mortal wounds, got %d", slain)
 	}
@@ -209,8 +214,8 @@ func TestCombat_DestroyedUnitStopsAttacking(t *testing.T) {
 			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
 		},
 		Weapons: []core.Weapon{
-			{Name: "Sword1", Range: 0, Attacks: 50, ToHit: 2, ToWound: 2, Rend: -5, Damage: 10},
-			{Name: "Sword2", Range: 0, Attacks: 50, ToHit: 2, ToWound: 2, Rend: -5, Damage: 10},
+			{Name: "Sword1", Range: 0, Attacks: 50, ToHit: 2, ToWound: 2, Rend: 5, Damage: 10},
+			{Name: "Sword2", Range: 0, Attacks: 50, ToHit: 2, ToWound: 2, Rend: 5, Damage: 10},
 		},
 	}
 
@@ -240,13 +245,13 @@ func TestResolveAttacks_WithRuleModifiers(t *testing.T) {
 	roller := dice.NewRoller(42)
 	engine := rules.NewEngine()
 
-	// Add cover rule: +1 to save (makes it easier = lower threshold)
+	// Add cover rule: -1 to hit rolls (AoS4: cover subtracts from hit rolls)
 	engine.AddRule(rules.Rule{
 		Name:    "Cover",
-		Trigger: rules.BeforeSaveRoll,
+		Trigger: rules.BeforeHitRoll,
 		Source:  rules.SourceTerrain,
 		Apply: func(ctx *rules.Context) {
-			ctx.Modifiers.SaveMod += 1
+			ctx.Modifiers.HitMod -= 1
 		},
 	})
 
@@ -267,10 +272,10 @@ func TestResolveAttacks_WithRuleModifiers(t *testing.T) {
 		},
 	}
 
-	resultWithCover := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0])
+	resultWithCover := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0], false)
 
-	// With cover (+1 save), the effective save is 3+ instead of 4+
-	// so fewer saves should fail compared to without cover
+	// With cover (-1 hit), fewer attacks will hit
+	// so less damage compared to without cover
 	roller2 := dice.NewRoller(42)
 	engine2 := rules.NewEngine() // no cover
 	attacker2 := &core.Unit{
@@ -290,7 +295,7 @@ func TestResolveAttacks_WithRuleModifiers(t *testing.T) {
 		},
 	}
 
-	resultWithout := ResolveAttacks(roller2, engine2, attacker2, defender2, &attacker2.Weapons[0])
+	resultWithout := ResolveAttacks(roller2, engine2, attacker2, defender2, &attacker2.Weapons[0], false)
 
 	// Cover should result in less damage
 	if resultWithCover.DamageDealt >= resultWithout.DamageDealt {

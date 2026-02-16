@@ -48,8 +48,7 @@ func (g *Game) AddPlayer(p Player) int {
 	return len(g.Players) - 1
 }
 
-// RegisterTerrainRules generates rules from all terrain on the board and
-// registers them in the rules engine. Call after placing all terrain.
+// RegisterTerrainRules generates rules from all terrain on the board.
 func (g *Game) RegisterTerrainRules() {
 	for _, r := range board.TerrainRules(g.Board) {
 		g.Rules.AddRule(r)
@@ -67,8 +66,8 @@ func (g *Game) CreateUnit(name string, ownerID int, stats core.Stats, weapons []
 			ID:            i,
 			Position:      position,
 			BaseSize:      baseSize,
-			CurrentWounds: stats.Wounds,
-			MaxWounds:     stats.Wounds,
+			CurrentWounds: stats.Health,
+			MaxWounds:     stats.Health,
 			IsAlive:       true,
 		}
 	}
@@ -123,13 +122,14 @@ func (g *Game) View(playerID int) *GameView {
 		var weaponViews []WeaponView
 		for _, w := range u.Weapons {
 			weaponViews = append(weaponViews, WeaponView{
-				Name:    w.Name,
-				Range:   w.Range,
-				Attacks: w.Attacks,
-				ToHit:   w.ToHit,
-				ToWound: w.ToWound,
-				Rend:    w.Rend,
-				Damage:  w.Damage,
+				Name:      w.Name,
+				Range:     w.Range,
+				Attacks:   w.Attacks,
+				ToHit:     w.ToHit,
+				ToWound:   w.ToWound,
+				Rend:      w.Rend,
+				Damage:    w.Damage,
+				Abilities: w.Abilities,
 			})
 		}
 
@@ -144,9 +144,12 @@ func (g *Game) View(playerID int) *GameView {
 			MaxWounds:     maxWounds,
 			MoveSpeed:     u.Stats.Move,
 			Save:          u.Stats.Save,
+			WardSave:      u.WardSave,
 			Weapons:       weaponViews,
 			StrikeOrder:   u.StrikeOrder,
 			HasMoved:      u.HasMoved,
+			HasRun:        u.HasRun,
+			HasRetreated:  u.HasRetreated,
 			HasShot:       u.HasShot,
 			HasFought:     u.HasFought,
 			HasCharged:    u.HasCharged,
@@ -185,27 +188,38 @@ func (g *Game) Logf(format string, args ...interface{}) {
 	g.Log = append(g.Log, msg)
 }
 
-// logCombatResult logs a visual representation of a combat resolution.
 func (g *Game) logCombatResult(attackerName, defenderName string, r CombatResult) {
 	g.Logf("    %s -> %s [%s]", attackerName, defenderName, r.WeaponName)
-	g.Logf("      %d attacks --(hit)--> %d --(wound)--> %d --(save)--> %d unsaved",
-		r.TotalAttacks, r.Hits, r.Wounds, r.SavesFailed)
-	if r.DamageDealt > 0 {
+	g.Logf("      %d attacks --(hit)--> %d (%d crit) --(wound)--> %d --(save)--> %d unsaved",
+		r.TotalAttacks, r.Hits, r.CriticalHits, r.Wounds, r.SavesFailed)
+	if r.DamageDealt > 0 || r.MortalDealt > 0 {
 		slainStr := ""
 		if r.ModelsSlain > 0 {
 			slainStr = fmt.Sprintf("  (%d models slain)", r.ModelsSlain)
 		}
-		g.Logf("      => %d damage dealt%s", r.DamageDealt, slainStr)
+		wardStr := ""
+		if r.WardSaved > 0 {
+			wardStr = fmt.Sprintf(", %d warded", r.WardSaved)
+		}
+		mortalStr := ""
+		if r.MortalDealt > 0 {
+			mortalStr = fmt.Sprintf(", %d mortal", r.MortalDealt)
+		}
+		g.Logf("      => %d damage dealt%s%s%s", r.DamageDealt, mortalStr, wardStr, slainStr)
 	} else {
 		g.Logf("      => No damage")
 	}
 }
 
-// ExecuteCommand validates and executes a command against the game state.
+// ExecuteCommand validates and executes a command.
 func (g *Game) ExecuteCommand(cmd interface{}) (command.Result, error) {
 	switch c := cmd.(type) {
 	case *command.MoveCommand:
 		return g.executeMove(c)
+	case *command.RunCommand:
+		return g.executeRun(c)
+	case *command.RetreatCommand:
+		return g.executeRetreat(c)
 	case *command.ShootCommand:
 		return g.executeShoot(c)
 	case *command.FightCommand:
@@ -232,6 +246,10 @@ func (g *Game) executeMove(cmd *command.MoveCommand) (command.Result, error) {
 	if unit.HasMoved {
 		return command.Result{}, fmt.Errorf("unit %d has already moved this turn", cmd.UnitID)
 	}
+	// Cannot normal move if engaged -- must retreat (Rule 14.1)
+	if g.isEngaged(unit) {
+		return command.Result{}, fmt.Errorf("unit %d is engaged, must retreat to leave combat", cmd.UnitID)
+	}
 	if !g.Board.IsInBounds(cmd.Destination) {
 		return command.Result{}, fmt.Errorf("destination (%.1f, %.1f) is out of bounds", cmd.Destination.X, cmd.Destination.Y)
 	}
@@ -239,7 +257,6 @@ func (g *Game) executeMove(cmd *command.MoveCommand) (command.Result, error) {
 	origin := unit.Position()
 	dist := core.Distance(origin, cmd.Destination)
 
-	// Evaluate movement rules
 	moveCtx := &rules.Context{
 		Attacker:    unit,
 		Origin:      origin,
@@ -261,7 +278,11 @@ func (g *Game) executeMove(cmd *command.MoveCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("move distance %.1f exceeds maximum %.0f", dist, maxMove)
 	}
 
-	// Move all alive models to destination (simplified: whole unit moves as one)
+	// Cannot end normal move within 3" of enemy (Rule 14.1)
+	if g.wouldEngageEnemy(unit, cmd.Destination) {
+		return command.Result{}, fmt.Errorf("cannot end normal move within 3\" of enemy unit")
+	}
+
 	for i := range unit.Models {
 		if unit.Models[i].IsAlive {
 			unit.Models[i].Position = cmd.Destination
@@ -270,6 +291,123 @@ func (g *Game) executeMove(cmd *command.MoveCommand) (command.Result, error) {
 	unit.HasMoved = true
 
 	desc := fmt.Sprintf("%s moved %.1f\" to (%.1f, %.1f)", unit.Name, dist, cmd.Destination.X, cmd.Destination.Y)
+	g.Logf("%s", desc)
+	return command.Result{Description: desc, Success: true}, nil
+}
+
+// executeRun: AoS4 Rule 14.1. Move + D6" extra. Cannot shoot or charge after.
+func (g *Game) executeRun(cmd *command.RunCommand) (command.Result, error) {
+	unit := g.GetUnit(cmd.UnitID)
+	if unit == nil {
+		return command.Result{}, fmt.Errorf("unit %d not found", cmd.UnitID)
+	}
+	if unit.OwnerID != cmd.OwnerID {
+		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.UnitID, cmd.OwnerID)
+	}
+	if unit.HasMoved {
+		return command.Result{}, fmt.Errorf("unit %d has already moved this turn", cmd.UnitID)
+	}
+	if g.isEngaged(unit) {
+		return command.Result{}, fmt.Errorf("unit %d is engaged, cannot run", cmd.UnitID)
+	}
+	if !g.Board.IsInBounds(cmd.Destination) {
+		return command.Result{}, fmt.Errorf("destination (%.1f, %.1f) is out of bounds", cmd.Destination.X, cmd.Destination.Y)
+	}
+
+	origin := unit.Position()
+	dist := core.Distance(origin, cmd.Destination)
+
+	moveCtx := &rules.Context{
+		Attacker:    unit,
+		Origin:      origin,
+		Destination: cmd.Destination,
+		Distance:    dist,
+	}
+	g.Rules.Evaluate(rules.BeforeMove, moveCtx)
+
+	if moveCtx.Blocked {
+		return command.Result{}, fmt.Errorf("run blocked: %s", moveCtx.BlockMessage)
+	}
+
+	runRoll := g.Roller.RollD6()
+	maxMove := float64(unit.Stats.Move+moveCtx.Modifiers.MoveMod) + float64(runRoll)
+	if maxMove < 0 {
+		maxMove = 0
+	}
+
+	if !board.MoveDistanceValid(origin, cmd.Destination, maxMove) {
+		return command.Result{}, fmt.Errorf("run distance %.1f exceeds maximum %.0f (Move %d + D6 roll %d)", dist, maxMove, unit.Stats.Move, runRoll)
+	}
+
+	if g.wouldEngageEnemy(unit, cmd.Destination) {
+		return command.Result{}, fmt.Errorf("cannot end run within 3\" of enemy unit")
+	}
+
+	for i := range unit.Models {
+		if unit.Models[i].IsAlive {
+			unit.Models[i].Position = cmd.Destination
+		}
+	}
+	unit.HasMoved = true
+	unit.HasRun = true
+
+	desc := fmt.Sprintf("%s ran %.1f\" to (%.1f, %.1f) (roll: %d)", unit.Name, dist, cmd.Destination.X, cmd.Destination.Y, runRoll)
+	g.Logf("%s", desc)
+	return command.Result{Description: desc, Success: true}, nil
+}
+
+// executeRetreat: AoS4 Rule 14.1. Move from combat, D3 mortal damage.
+func (g *Game) executeRetreat(cmd *command.RetreatCommand) (command.Result, error) {
+	unit := g.GetUnit(cmd.UnitID)
+	if unit == nil {
+		return command.Result{}, fmt.Errorf("unit %d not found", cmd.UnitID)
+	}
+	if unit.OwnerID != cmd.OwnerID {
+		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.UnitID, cmd.OwnerID)
+	}
+	if unit.HasMoved {
+		return command.Result{}, fmt.Errorf("unit %d has already moved this turn", cmd.UnitID)
+	}
+	if !g.isEngaged(unit) {
+		return command.Result{}, fmt.Errorf("unit %d is not engaged, use normal move", cmd.UnitID)
+	}
+	if !g.Board.IsInBounds(cmd.Destination) {
+		return command.Result{}, fmt.Errorf("destination (%.1f, %.1f) is out of bounds", cmd.Destination.X, cmd.Destination.Y)
+	}
+
+	origin := unit.Position()
+	dist := core.Distance(origin, cmd.Destination)
+
+	maxMove := float64(unit.Stats.Move)
+	if !board.MoveDistanceValid(origin, cmd.Destination, maxMove) {
+		return command.Result{}, fmt.Errorf("retreat distance %.1f exceeds maximum %.0f", dist, maxMove)
+	}
+
+	if g.wouldEngageEnemy(unit, cmd.Destination) {
+		return command.Result{}, fmt.Errorf("cannot end retreat within 3\" of enemy unit")
+	}
+
+	// D3 mortal damage for retreating
+	mortalDmg := g.Roller.RollD3()
+	g.Logf("    %s retreats and suffers %d mortal damage", unit.Name, mortalDmg)
+	ResolveMortalWounds(g.Roller, unit, mortalDmg)
+
+	if unit.IsDestroyed() {
+		desc := fmt.Sprintf("%s was destroyed while retreating!", unit.Name)
+		g.Logf("    %s", desc)
+		g.CheckVictory()
+		return command.Result{Description: desc, Success: true}, nil
+	}
+
+	for i := range unit.Models {
+		if unit.Models[i].IsAlive {
+			unit.Models[i].Position = cmd.Destination
+		}
+	}
+	unit.HasMoved = true
+	unit.HasRetreated = true
+
+	desc := fmt.Sprintf("%s retreated %.1f\" to (%.1f, %.1f)", unit.Name, dist, cmd.Destination.X, cmd.Destination.Y)
 	g.Logf("%s", desc)
 	return command.Result{Description: desc, Success: true}, nil
 }
@@ -292,16 +430,35 @@ func (g *Game) executeShoot(cmd *command.ShootCommand) (command.Result, error) {
 	if shooter.HasShot {
 		return command.Result{}, fmt.Errorf("unit %d has already shot this turn", cmd.ShooterID)
 	}
+	if shooter.HasRun {
+		return command.Result{}, fmt.Errorf("unit %d ran this turn and cannot shoot", cmd.ShooterID)
+	}
+	if shooter.HasRetreated {
+		return command.Result{}, fmt.Errorf("unit %d retreated this turn and cannot shoot", cmd.ShooterID)
+	}
 	if len(shooter.RangedWeapons()) == 0 {
 		return command.Result{}, fmt.Errorf("unit %d has no ranged weapons", cmd.ShooterID)
 	}
+	// Cannot shoot while engaged unless Shoot in Combat ability (Rule 15.0)
+	if g.isEngaged(shooter) {
+		hasShootInCombat := false
+		for _, idx := range shooter.RangedWeapons() {
+			if shooter.Weapons[idx].HasAbility(core.AbilityShootInCombat) {
+				hasShootInCombat = true
+				break
+			}
+		}
+		if !hasShootInCombat {
+			return command.Result{}, fmt.Errorf("unit %d is engaged and cannot shoot", cmd.ShooterID)
+		}
+	}
 
-	// Evaluate shooting rules
 	dist := core.Distance(shooter.Position(), target.Position())
 	shootCtx := &rules.Context{
-		Attacker: shooter,
-		Defender: target,
-		Distance: dist,
+		Attacker:   shooter,
+		Defender:   target,
+		Distance:   dist,
+		IsShooting: true,
 	}
 	g.Rules.Evaluate(rules.BeforeShoot, shootCtx)
 
@@ -309,7 +466,6 @@ func (g *Game) executeShoot(cmd *command.ShootCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("shooting blocked: %s", shootCtx.BlockMessage)
 	}
 
-	// Check range for each ranged weapon
 	for _, idx := range shooter.RangedWeapons() {
 		if dist > float64(shooter.Weapons[idx].Range) {
 			return command.Result{}, fmt.Errorf("target is out of range (%.1f\" > %d\")", dist, shooter.Weapons[idx].Range)
@@ -353,7 +509,6 @@ func (g *Game) executeFight(cmd *command.FightCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("unit %d has no melee weapons", cmd.AttackerID)
 	}
 
-	// Check melee range (3" engagement range in AoS)
 	dist := core.Distance(attacker.Position(), target.Position())
 	if dist > 3.0 {
 		return command.Result{}, fmt.Errorf("target is out of melee range (%.1f\" > 3\")", dist)
@@ -392,15 +547,18 @@ func (g *Game) executeCharge(cmd *command.ChargeCommand) (command.Result, error)
 	if charger.HasCharged {
 		return command.Result{}, fmt.Errorf("unit %d has already charged this turn", cmd.ChargerID)
 	}
+	if charger.HasRun {
+		return command.Result{}, fmt.Errorf("unit %d ran this turn and cannot charge", cmd.ChargerID)
+	}
+	if charger.HasRetreated {
+		return command.Result{}, fmt.Errorf("unit %d retreated this turn and cannot charge", cmd.ChargerID)
+	}
 
 	dist := core.Distance(charger.Position(), target.Position())
-
-	// Must be within 12" to declare a charge
 	if dist > 12.0 {
 		return command.Result{}, fmt.Errorf("target is too far to charge (%.1f\" > 12\")", dist)
 	}
 
-	// Evaluate charge rules
 	chargeCtx := &rules.Context{
 		Attacker: charger,
 		Defender: target,
@@ -414,7 +572,6 @@ func (g *Game) executeCharge(cmd *command.ChargeCommand) (command.Result, error)
 		return command.Result{}, fmt.Errorf("charge blocked: %s", chargeCtx.BlockMessage)
 	}
 
-	// Roll 2D6 for charge distance (+ any modifiers from rules)
 	chargeRoll := g.Roller.Roll2D6() + chargeCtx.Modifiers.ChargeMod
 	g.Logf("Charge roll: %d", chargeRoll)
 
@@ -425,7 +582,6 @@ func (g *Game) executeCharge(cmd *command.ChargeCommand) (command.Result, error)
 		return command.Result{Description: desc, Success: false}, nil
 	}
 
-	// Move charger into engagement range (within 0.5" of target)
 	newPos := charger.Position().Towards(target.Position(), dist-0.5)
 	for i := range charger.Models {
 		if charger.Models[i].IsAlive {
@@ -439,14 +595,14 @@ func (g *Game) executeCharge(cmd *command.ChargeCommand) (command.Result, error)
 	return command.Result{Description: desc, Success: true}, nil
 }
 
-// ResetTurnFlags resets all unit action flags for a new battle round.
+// ResetTurnFlags resets all unit action flags.
 func (g *Game) ResetTurnFlags() {
 	for _, u := range g.Units {
 		u.ResetPhaseFlags()
 	}
 }
 
-// CheckVictory checks if a player has won (opponent has no units left).
+// CheckVictory checks if a player has won.
 func (g *Game) CheckVictory() {
 	if len(g.Players) < 2 {
 		return
@@ -455,7 +611,6 @@ func (g *Game) CheckVictory() {
 		units := g.UnitsForPlayer(p.ID())
 		if len(units) == 0 {
 			g.IsOver = true
-			// The other player wins
 			for _, other := range g.Players {
 				if other.ID() != p.ID() {
 					g.Winner = other.ID()
@@ -467,10 +622,6 @@ func (g *Game) CheckVictory() {
 	}
 }
 
-// rollOffPriority rolls a die for each player and returns the player indices
-// in activation order: [first, second]. The winner of the roll-off chooses
-// who goes first (we assume the winner always picks themselves).
-// On a tie, re-roll.
 func (g *Game) rollOffPriority() (first, second int) {
 	for {
 		roll0 := g.Roller.RollD6()
@@ -489,8 +640,6 @@ func (g *Game) rollOffPriority() (first, second int) {
 	}
 }
 
-// runPlayerPhase runs a single non-alternating phase for one player.
-// The player issues commands until they end the phase.
 func (g *Game) runPlayerPhase(playerIdx int, p phase.Phase) {
 	player := g.Players[playerIdx]
 	g.ActivePlayer = playerIdx
@@ -521,8 +670,6 @@ func (g *Game) runPlayerPhase(playerIdx int, p phase.Phase) {
 	}
 }
 
-// engagedUnits returns all non-destroyed units for a player that are within
-// 3" engagement range of at least one enemy unit and haven't fought yet.
 func (g *Game) engagedUnits(playerID int, strikeOrder core.StrikeOrder) []*core.Unit {
 	var result []*core.Unit
 	for _, u := range g.Units {
@@ -539,7 +686,6 @@ func (g *Game) engagedUnits(playerID int, strikeOrder core.StrikeOrder) []*core.
 	return result
 }
 
-// isEngaged returns true if the unit is within 3" of any enemy unit.
 func (g *Game) isEngaged(u *core.Unit) bool {
 	for _, other := range g.Units {
 		if other.OwnerID == u.OwnerID || other.IsDestroyed() {
@@ -552,7 +698,19 @@ func (g *Game) isEngaged(u *core.Unit) bool {
 	return false
 }
 
-// nearestEnemyPos returns the position of the closest enemy unit to u.
+// wouldEngageEnemy returns true if moving to pos would bring the unit within 3" of any enemy.
+func (g *Game) wouldEngageEnemy(u *core.Unit, pos core.Position) bool {
+	for _, other := range g.Units {
+		if other.OwnerID == u.OwnerID || other.IsDestroyed() {
+			continue
+		}
+		if core.Distance(pos, other.Position()) <= 3.0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Game) nearestEnemyPos(u *core.Unit) (core.Position, bool) {
 	bestDist := math.MaxFloat64
 	var bestPos core.Position
@@ -571,8 +729,6 @@ func (g *Game) nearestEnemyPos(u *core.Unit) (core.Position, bool) {
 	return bestPos, found
 }
 
-// executePileIn moves a unit up to 3" but it must end closer to the
-// nearest enemy model than where it started.
 func (g *Game) executePileIn(cmd *command.PileInCommand) (command.Result, error) {
 	unit := g.GetUnit(cmd.UnitID)
 	if unit == nil {
@@ -594,7 +750,6 @@ func (g *Game) executePileIn(cmd *command.PileInCommand) (command.Result, error)
 	origin := unit.Position()
 	distBefore := core.Distance(origin, enemyPos)
 
-	// Evaluate pile-in rules
 	pileInCtx := &rules.Context{
 		Attacker:    unit,
 		Origin:      origin,
@@ -608,10 +763,8 @@ func (g *Game) executePileIn(cmd *command.PileInCommand) (command.Result, error)
 		return command.Result{Description: fmt.Sprintf("%s: pile-in blocked: %s", unit.Name, pileInCtx.BlockMessage), Success: false}, nil
 	}
 
-	// Move up to 3" toward nearest enemy (+ any pile-in modifier)
 	pileInDist := 3.0 + float64(pileInCtx.Modifiers.PileInMod)
 	if distBefore <= pileInDist {
-		// Already very close, move to within 0.5"
 		pileInDist = distBefore - 0.5
 		if pileInDist < 0 {
 			pileInDist = 0
@@ -626,7 +779,6 @@ func (g *Game) executePileIn(cmd *command.PileInCommand) (command.Result, error)
 	newPos := origin.Towards(enemyPos, pileInDist)
 	distAfter := core.Distance(newPos, enemyPos)
 
-	// Must end closer to the nearest enemy
 	if distAfter >= distBefore {
 		unit.HasPiledIn = true
 		return command.Result{Description: fmt.Sprintf("%s: cannot pile in closer", unit.Name), Success: true}, nil
@@ -645,9 +797,6 @@ func (g *Game) executePileIn(cmd *command.PileInCommand) (command.Result, error)
 	return command.Result{Description: desc, Success: true}, nil
 }
 
-// runCombatSubPhase runs one sub-phase of combat (strike-first, normal, or strike-last).
-// Both players alternate activations. The priority player picks first.
-// Each activation: pile-in -> fight. Units in engagement range must fight.
 func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p phase.Phase) {
 	otherIdx := 1 - turnPlayerIdx
 	playerOrder := [2]int{turnPlayerIdx, otherIdx}
@@ -657,7 +806,6 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 			return
 		}
 
-		// Check which players still have eligible units
 		anyActivated := false
 
 		for i := 0; i < 2; i++ {
@@ -674,8 +822,6 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 			}
 
 			g.ActivePlayer = playerIdx
-
-			// Let the player choose which unit to activate
 			view := g.View(player.ID())
 			cmd := player.GetNextCommand(view, p)
 
@@ -684,14 +830,11 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 			}
 
 			if _, ok := cmd.(*command.EndPhaseCommand); ok {
-				// Player passes this activation, but if they have engaged units
-				// they'll need to fight eventually. For now, auto-fight the first eligible.
 				g.autoFightUnit(eligible[0])
 				anyActivated = true
 				continue
 			}
 
-			// Handle pile-in command
 			if pileCmd, ok := cmd.(*command.PileInCommand); ok {
 				result, err := g.executePileIn(pileCmd)
 				if err != nil {
@@ -699,7 +842,6 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 				} else {
 					g.Logf("    %s", result.String())
 				}
-				// After pile-in the player still needs to fight - auto-fight
 				unit := g.GetUnit(pileCmd.UnitID)
 				if unit != nil && !unit.HasFought && !unit.IsDestroyed() {
 					g.autoFightUnit(unit)
@@ -708,9 +850,7 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 				continue
 			}
 
-			// Handle fight command (player may skip pile-in)
 			if fightCmd, ok := cmd.(*command.FightCommand); ok {
-				// Auto pile-in first if not done
 				unit := g.GetUnit(fightCmd.AttackerID)
 				if unit != nil && !unit.HasPiledIn {
 					g.executePileIn(&command.PileInCommand{
@@ -725,12 +865,10 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 					g.Logf("    %s", result.String())
 				}
 				anyActivated = true
-
 				g.CheckVictory()
 				continue
 			}
 
-			// Any other command in combat phase
 			result, err := g.ExecuteCommand(cmd)
 			if err != nil {
 				g.Logf("    Error: %s", err.Error())
@@ -738,7 +876,6 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 				g.Logf("    %s", result.String())
 			}
 			anyActivated = true
-
 			g.CheckVictory()
 		}
 
@@ -748,14 +885,11 @@ func (g *Game) runCombatSubPhase(turnPlayerIdx int, order core.StrikeOrder, p ph
 	}
 }
 
-// autoFightUnit performs a pile-in and fight for a unit automatically,
-// targeting the nearest enemy in melee range.
 func (g *Game) autoFightUnit(unit *core.Unit) {
 	if unit.IsDestroyed() || unit.HasFought {
 		return
 	}
 
-	// Pile-in if not done yet
 	if !unit.HasPiledIn {
 		g.executePileIn(&command.PileInCommand{
 			OwnerID: unit.OwnerID,
@@ -763,7 +897,6 @@ func (g *Game) autoFightUnit(unit *core.Unit) {
 		})
 	}
 
-	// Find nearest enemy within 3"
 	var bestTarget *core.Unit
 	bestDist := math.MaxFloat64
 	for _, other := range g.Units {
@@ -796,11 +929,6 @@ func (g *Game) autoFightUnit(unit *core.Unit) {
 	g.CheckVictory()
 }
 
-// runAlternatingPhase runs the combat phase with 3 sub-phases:
-// 1. Strike-first units (both players alternate, priority player first)
-// 2. Normal units (both players alternate, priority player first)
-// 3. Strike-last units (both players alternate, priority player first)
-// Units in engagement range (3") must fight.
 func (g *Game) runAlternatingPhase(turnPlayerIdx int, p phase.Phase) {
 	subPhases := []struct {
 		order core.StrikeOrder
@@ -816,7 +944,6 @@ func (g *Game) runAlternatingPhase(turnPlayerIdx int, p phase.Phase) {
 			return
 		}
 
-		// Check if any units exist for this sub-phase
 		hasUnits := false
 		for _, player := range g.Players {
 			if len(g.engagedUnits(player.ID(), sp.order)) > 0 {
@@ -836,9 +963,6 @@ func (g *Game) runAlternatingPhase(turnPlayerIdx int, p phase.Phase) {
 	}
 }
 
-// runPlayerTurn executes all 6 phases for a single player's turn.
-// Most phases are exclusive to the active player. Alternating phases
-// (Combat) have both players taking turns picking units.
 func (g *Game) runPlayerTurn(playerIdx int) {
 	phases := phase.StandardTurnSequence()
 	player := g.Players[playerIdx]
@@ -861,9 +985,7 @@ func (g *Game) runPlayerTurn(playerIdx int) {
 	}
 }
 
-// RunGame executes the main game loop for a given number of battle rounds.
-// Each round: roll-off for priority, then first player does all 6 phases
-// (with Combat being alternating), then second player does the same.
+// RunGame executes the main game loop.
 func (g *Game) RunGame(maxRounds int) {
 	if len(g.Players) < 2 {
 		g.Logf("Need at least 2 players to start a game")
@@ -874,18 +996,15 @@ func (g *Game) RunGame(maxRounds int) {
 		g.BattleRound = round
 		g.Logf("=== BATTLE ROUND %d ===", round)
 
-		// Priority roll-off: winner chooses who goes first
 		first, second := g.rollOffPriority()
 		g.PriorityPlayer = first
 
-		// First player's turn: all 6 phases
 		g.ResetTurnFlags()
 		g.runPlayerTurn(first)
 		if g.IsOver {
 			return
 		}
 
-		// Second player's turn: all 6 phases
 		g.ResetTurnFlags()
 		g.runPlayerTurn(second)
 		if g.IsOver {

@@ -1,99 +1,123 @@
 package board
 
 import (
+	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/rules"
 )
 
 // TerrainRules generates all rules implied by the terrain features on a board.
-// Call this after all terrain has been placed and pass the result to Engine.AddRule.
+// AoS4 Advanced Rules: Terrain 1.2.
 func TerrainRules(b *Board) []rules.Rule {
 	var result []rules.Rule
 
 	for _, t := range b.Terrain {
 		switch t.Type {
-		case TerrainWoods:
-			result = append(result, woodsRules(b, t)...)
 		case TerrainObstacle:
-			result = append(result, obstacleRules(b, t)...)
-		case TerrainRuins:
-			result = append(result, ruinsRules(b, t)...)
+			// Cover + Unstable (Rule 1.4.1)
+			result = append(result, coverRule(t)...)
+			result = append(result, unstableRule(t)...)
+		case TerrainObscuring:
+			// Cover + Obscuring + Unstable (Rule 1.4.2)
+			result = append(result, coverRule(t)...)
+			result = append(result, obscuringRule(t)...)
+			result = append(result, unstableRule(t)...)
+		case TerrainArea:
+			// Cover only (Rule 1.4.3)
+			result = append(result, coverRule(t)...)
+		case TerrainPlaceOfPower:
+			// Cover + Place of Power + Unstable (Rule 1.4.4)
+			result = append(result, coverRule(t)...)
+			result = append(result, unstableRule(t)...)
 		case TerrainImpassable:
-			result = append(result, impassableRules(b, t)...)
+			result = append(result, impassableRules(t)...)
 		}
 	}
 
 	return result
 }
 
-// woodsRules: -2" movement when moving through woods, +1 save for defender inside.
-func woodsRules(b *Board, t *TerrainFeature) []rules.Rule {
+// coverRule: AoS4 Rule 1.2 Cover.
+// Subtract 1 from HIT ROLLS for attacks that target a unit behind or wholly
+// on this terrain feature, unless the target charged this turn or has Fly.
+func coverRule(t *TerrainFeature) []rules.Rule {
 	return []rules.Rule{
 		{
-			Name:    t.Name + ":MovePenalty",
+			Name:    t.Name + ":Cover",
+			Trigger: rules.BeforeHitRoll,
+			Source:  rules.SourceTerrain,
+			Condition: func(ctx *rules.Context) bool {
+				if ctx.Defender == nil {
+					return false
+				}
+				if ctx.Defender.HasCharged {
+					return false
+				}
+				if ctx.Defender.HasKeyword(core.KeywordFly) {
+					return false
+				}
+				return t.Contains(ctx.Defender.Position())
+			},
+			Apply: func(ctx *rules.Context) {
+				ctx.Modifiers.HitMod -= 1
+			},
+		},
+	}
+}
+
+// obscuringRule: AoS4 Rule 1.2 Obscuring.
+// A unit cannot be targeted by shooting attacks from enemies not within
+// its combat range if it is behind or wholly on this terrain, unless it has Fly.
+func obscuringRule(t *TerrainFeature) []rules.Rule {
+	return []rules.Rule{
+		{
+			Name:    t.Name + ":Obscuring",
+			Trigger: rules.BeforeShoot,
+			Source:  rules.SourceTerrain,
+			Condition: func(ctx *rules.Context) bool {
+				if ctx.Defender == nil || ctx.Attacker == nil {
+					return false
+				}
+				if !t.Contains(ctx.Defender.Position()) {
+					return false
+				}
+				if ctx.Defender.HasKeyword(core.KeywordFly) {
+					return false
+				}
+				dist := core.Distance(ctx.Attacker.Position(), ctx.Defender.Position())
+				if dist <= 3.0 {
+					return false
+				}
+				return true
+			},
+			Apply: func(ctx *rules.Context) {
+				ctx.Blocked = true
+				ctx.BlockMessage = "target is obscured by " + t.Name
+			},
+		},
+	}
+}
+
+// unstableRule: AoS4 Rule 1.2 Unstable.
+// Models cannot end moves on terrain >1" tall. Simplified: block ending moves inside.
+func unstableRule(t *TerrainFeature) []rules.Rule {
+	return []rules.Rule{
+		{
+			Name:    t.Name + ":Unstable",
 			Trigger: rules.BeforeMove,
 			Source:  rules.SourceTerrain,
 			Condition: func(ctx *rules.Context) bool {
-				// Applies if destination is inside the woods
 				return t.Contains(ctx.Destination)
 			},
 			Apply: func(ctx *rules.Context) {
-				ctx.Modifiers.MoveMod -= 2
-			},
-		},
-		{
-			Name:    t.Name + ":Cover",
-			Trigger: rules.BeforeSaveRoll,
-			Source:  rules.SourceTerrain,
-			Condition: func(ctx *rules.Context) bool {
-				// Defender gets cover if inside the woods
-				return ctx.Defender != nil && t.Contains(ctx.Defender.Position())
-			},
-			Apply: func(ctx *rules.Context) {
-				ctx.Modifiers.SaveMod += 1
+				ctx.Blocked = true
+				ctx.BlockMessage = "cannot end move on " + t.Name + " (unstable)"
 			},
 		},
 	}
 }
 
-// obstacleRules: +1 save for defender behind obstacle (shooting only).
-func obstacleRules(b *Board, t *TerrainFeature) []rules.Rule {
-	return []rules.Rule{
-		{
-			Name:    t.Name + ":Cover",
-			Trigger: rules.BeforeSaveRoll,
-			Source:  rules.SourceTerrain,
-			Condition: func(ctx *rules.Context) bool {
-				// Defender gets cover if inside/behind the obstacle
-				return ctx.Defender != nil &&
-					ctx.Weapon != nil && ctx.Weapon.IsRanged() &&
-					t.Contains(ctx.Defender.Position())
-			},
-			Apply: func(ctx *rules.Context) {
-				ctx.Modifiers.SaveMod += 1
-			},
-		},
-	}
-}
-
-// ruinsRules: +1 save for defender inside ruins (both melee and ranged).
-func ruinsRules(b *Board, t *TerrainFeature) []rules.Rule {
-	return []rules.Rule{
-		{
-			Name:    t.Name + ":Cover",
-			Trigger: rules.BeforeSaveRoll,
-			Source:  rules.SourceTerrain,
-			Condition: func(ctx *rules.Context) bool {
-				return ctx.Defender != nil && t.Contains(ctx.Defender.Position())
-			},
-			Apply: func(ctx *rules.Context) {
-				ctx.Modifiers.SaveMod += 1
-			},
-		},
-	}
-}
-
-// impassableRules: block movement and charging into the terrain.
-func impassableRules(b *Board, t *TerrainFeature) []rules.Rule {
+// impassableRules: block movement and charging into terrain entirely.
+func impassableRules(t *TerrainFeature) []rules.Rule {
 	return []rules.Rule{
 		{
 			Name:    t.Name + ":BlockMove",
@@ -112,12 +136,9 @@ func impassableRules(b *Board, t *TerrainFeature) []rules.Rule {
 			Trigger: rules.BeforeCharge,
 			Source:  rules.SourceTerrain,
 			Condition: func(ctx *rules.Context) bool {
-				// Block charge if the charger would end up in impassable terrain
 				if ctx.Defender == nil {
 					return false
 				}
-				// The charge moves toward the target. If the target is in impassable terrain,
-				// block the charge.
 				return t.Contains(ctx.Defender.Position())
 			},
 			Apply: func(ctx *rules.Context) {

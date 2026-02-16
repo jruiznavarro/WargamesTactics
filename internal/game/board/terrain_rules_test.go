@@ -16,12 +16,87 @@ func setupEngine(b *board.Board) *rules.Engine {
 	return e
 }
 
-func TestWoods_MovePenalty(t *testing.T) {
+// --- Obstacle: Cover + Unstable ---
+
+func TestObstacle_CoverReducesHitRoll(t *testing.T) {
 	b := board.NewBoard(48, 24)
-	b.AddTerrain("Forest", board.TerrainWoods, core.Position{X: 10, Y: 10}, 6, 6)
+	b.AddTerrain("Wall", board.TerrainObstacle, core.Position{X: 10, Y: 10}, 4, 4)
 	e := setupEngine(b)
 
-	// Moving INTO the woods should apply -2 movement
+	defender := &core.Unit{
+		ID: 2,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 12, Y: 12}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	ctx := &rules.Context{
+		Attacker: &core.Unit{ID: 1},
+		Defender: defender,
+		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
+	}
+	e.Evaluate(rules.BeforeHitRoll, ctx)
+
+	if ctx.Modifiers.HitMod != -1 {
+		t.Errorf("expected HitMod -1 from cover, got %d", ctx.Modifiers.HitMod)
+	}
+}
+
+func TestObstacle_CoverIgnoredIfCharged(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Wall", board.TerrainObstacle, core.Position{X: 10, Y: 10}, 4, 4)
+	e := setupEngine(b)
+
+	defender := &core.Unit{
+		ID:         2,
+		HasCharged: true,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 12, Y: 12}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	ctx := &rules.Context{
+		Attacker: &core.Unit{ID: 1},
+		Defender: defender,
+		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
+	}
+	e.Evaluate(rules.BeforeHitRoll, ctx)
+
+	if ctx.Modifiers.HitMod != 0 {
+		t.Errorf("expected HitMod 0 (charged unit ignores cover), got %d", ctx.Modifiers.HitMod)
+	}
+}
+
+func TestObstacle_CoverIgnoredIfFly(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Wall", board.TerrainObstacle, core.Position{X: 10, Y: 10}, 4, 4)
+	e := setupEngine(b)
+
+	defender := &core.Unit{
+		ID:       2,
+		Keywords: []core.Keyword{core.KeywordFly},
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 12, Y: 12}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	ctx := &rules.Context{
+		Attacker: &core.Unit{ID: 1},
+		Defender: defender,
+		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
+	}
+	e.Evaluate(rules.BeforeHitRoll, ctx)
+
+	if ctx.Modifiers.HitMod != 0 {
+		t.Errorf("expected HitMod 0 (Fly ignores cover), got %d", ctx.Modifiers.HitMod)
+	}
+}
+
+func TestObstacle_UnstableBlocksMove(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Wall", board.TerrainObstacle, core.Position{X: 10, Y: 10}, 4, 4)
+	e := setupEngine(b)
+
 	ctx := &rules.Context{
 		Attacker:    &core.Unit{ID: 1},
 		Origin:      core.Position{X: 5, Y: 12},
@@ -29,32 +104,124 @@ func TestWoods_MovePenalty(t *testing.T) {
 	}
 	e.Evaluate(rules.BeforeMove, ctx)
 
-	if ctx.Modifiers.MoveMod != -2 {
-		t.Errorf("expected MoveMod -2 in woods, got %d", ctx.Modifiers.MoveMod)
+	if !ctx.Blocked {
+		t.Error("expected move into obstacle terrain to be blocked (unstable)")
+	}
+}
+
+// --- Obscuring: Cover + Obscuring + Unstable ---
+
+func TestObscuring_CoverReducesHitRoll(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 10, Y: 10}, 6, 6)
+	e := setupEngine(b)
+
+	defender := &core.Unit{
+		ID: 2,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 13, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
 	}
 
-	// Moving to position OUTSIDE the woods should NOT apply penalty
-	ctx2 := &rules.Context{
+	ctx := &rules.Context{
+		Attacker: &core.Unit{ID: 1},
+		Defender: defender,
+		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
+	}
+	e.Evaluate(rules.BeforeHitRoll, ctx)
+
+	if ctx.Modifiers.HitMod != -1 {
+		t.Errorf("expected HitMod -1 from cover in obscuring terrain, got %d", ctx.Modifiers.HitMod)
+	}
+}
+
+func TestObscuring_BlocksShootingFromDistance(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 10, Y: 10}, 6, 6)
+	e := setupEngine(b)
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 0, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+	defender := &core.Unit{
+		ID: 2,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 13, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	ctx := &rules.Context{
+		Attacker: attacker,
+		Defender: defender,
+	}
+	e.Evaluate(rules.BeforeShoot, ctx)
+
+	if !ctx.Blocked {
+		t.Error("expected shooting to be blocked by obscuring terrain (attacker >3\" away)")
+	}
+}
+
+func TestObscuring_AllowsShootingFromCombatRange(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 10, Y: 10}, 6, 6)
+	e := setupEngine(b)
+
+	// Attacker is within 3" of defender
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 11, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+	defender := &core.Unit{
+		ID: 2,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 13, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	ctx := &rules.Context{
+		Attacker: attacker,
+		Defender: defender,
+	}
+	e.Evaluate(rules.BeforeShoot, ctx)
+
+	if ctx.Blocked {
+		t.Error("shooting should not be blocked when attacker is within 3\" of defender")
+	}
+}
+
+func TestObscuring_UnstableBlocksMove(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 10, Y: 10}, 6, 6)
+	e := setupEngine(b)
+
+	ctx := &rules.Context{
 		Attacker:    &core.Unit{ID: 1},
 		Origin:      core.Position{X: 5, Y: 12},
-		Destination: core.Position{X: 8, Y: 12},
+		Destination: core.Position{X: 13, Y: 13},
 	}
-	e.Evaluate(rules.BeforeMove, ctx2)
+	e.Evaluate(rules.BeforeMove, ctx)
 
-	if ctx2.Modifiers.MoveMod != 0 {
-		t.Errorf("expected MoveMod 0 outside woods, got %d", ctx2.Modifiers.MoveMod)
+	if !ctx.Blocked {
+		t.Error("expected move into obscuring terrain to be blocked (unstable)")
 	}
 }
 
-func TestWoods_CoverBonus(t *testing.T) {
+// --- Area: Cover only ---
+
+func TestArea_CoverReducesHitRoll(t *testing.T) {
 	b := board.NewBoard(48, 24)
-	b.AddTerrain("Forest", board.TerrainWoods, core.Position{X: 10, Y: 10}, 6, 6)
+	b.AddTerrain("Hill", board.TerrainArea, core.Position{X: 10, Y: 10}, 6, 6)
 	e := setupEngine(b)
 
 	defender := &core.Unit{
 		ID: 2,
 		Models: []core.Model{
-			{ID: 0, Position: core.Position{X: 12, Y: 12}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+			{ID: 0, Position: core.Position{X: 13, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
 		},
 	}
 
@@ -63,84 +230,31 @@ func TestWoods_CoverBonus(t *testing.T) {
 		Defender: defender,
 		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
 	}
-	e.Evaluate(rules.BeforeSaveRoll, ctx)
+	e.Evaluate(rules.BeforeHitRoll, ctx)
 
-	if ctx.Modifiers.SaveMod != 1 {
-		t.Errorf("expected SaveMod +1 in woods, got %d", ctx.Modifiers.SaveMod)
+	if ctx.Modifiers.HitMod != -1 {
+		t.Errorf("expected HitMod -1 from area terrain cover, got %d", ctx.Modifiers.HitMod)
 	}
 }
 
-func TestObstacle_CoverOnlyRanged(t *testing.T) {
+func TestArea_DoesNotBlockMove(t *testing.T) {
 	b := board.NewBoard(48, 24)
-	b.AddTerrain("Wall", board.TerrainObstacle, core.Position{X: 10, Y: 10}, 4, 2)
+	b.AddTerrain("Hill", board.TerrainArea, core.Position{X: 10, Y: 10}, 6, 6)
 	e := setupEngine(b)
 
-	defender := &core.Unit{
-		ID: 2,
-		Models: []core.Model{
-			{ID: 0, Position: core.Position{X: 12, Y: 11}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
-		},
-	}
-
-	// Ranged weapon should get cover
 	ctx := &rules.Context{
-		Attacker: &core.Unit{ID: 1},
-		Defender: defender,
-		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
+		Attacker:    &core.Unit{ID: 1},
+		Origin:      core.Position{X: 5, Y: 12},
+		Destination: core.Position{X: 13, Y: 13},
 	}
-	e.Evaluate(rules.BeforeSaveRoll, ctx)
+	e.Evaluate(rules.BeforeMove, ctx)
 
-	if ctx.Modifiers.SaveMod != 1 {
-		t.Errorf("expected SaveMod +1 behind obstacle (ranged), got %d", ctx.Modifiers.SaveMod)
-	}
-
-	// Melee weapon should NOT get cover from obstacle
-	ctx2 := &rules.Context{
-		Attacker: &core.Unit{ID: 1},
-		Defender: defender,
-		Weapon:   &core.Weapon{Name: "Sword", Range: 0},
-	}
-	e.Evaluate(rules.BeforeSaveRoll, ctx2)
-
-	if ctx2.Modifiers.SaveMod != 0 {
-		t.Errorf("expected SaveMod 0 behind obstacle (melee), got %d", ctx2.Modifiers.SaveMod)
+	if ctx.Blocked {
+		t.Error("area terrain should not block movement")
 	}
 }
 
-func TestRuins_CoverBothMeleeAndRanged(t *testing.T) {
-	b := board.NewBoard(48, 24)
-	b.AddTerrain("Ruins", board.TerrainRuins, core.Position{X: 10, Y: 10}, 5, 5)
-	e := setupEngine(b)
-
-	defender := &core.Unit{
-		ID: 2,
-		Models: []core.Model{
-			{ID: 0, Position: core.Position{X: 12, Y: 12}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
-		},
-	}
-
-	// Ranged
-	ctx := &rules.Context{
-		Attacker: &core.Unit{ID: 1},
-		Defender: defender,
-		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
-	}
-	e.Evaluate(rules.BeforeSaveRoll, ctx)
-	if ctx.Modifiers.SaveMod != 1 {
-		t.Errorf("expected SaveMod +1 in ruins (ranged), got %d", ctx.Modifiers.SaveMod)
-	}
-
-	// Melee
-	ctx2 := &rules.Context{
-		Attacker: &core.Unit{ID: 1},
-		Defender: defender,
-		Weapon:   &core.Weapon{Name: "Sword", Range: 0},
-	}
-	e.Evaluate(rules.BeforeSaveRoll, ctx2)
-	if ctx2.Modifiers.SaveMod != 1 {
-		t.Errorf("expected SaveMod +1 in ruins (melee), got %d", ctx2.Modifiers.SaveMod)
-	}
-}
+// --- Impassable ---
 
 func TestImpassable_BlocksMovement(t *testing.T) {
 	b := board.NewBoard(48, 24)
@@ -186,6 +300,8 @@ func TestImpassable_BlocksCharge(t *testing.T) {
 	}
 }
 
+// --- Open ---
+
 func TestOpenTerrain_NoEffect(t *testing.T) {
 	b := board.NewBoard(48, 24)
 	b.AddTerrain("Field", board.TerrainOpen, core.Position{X: 10, Y: 10}, 6, 6)
@@ -206,14 +322,16 @@ func TestOpenTerrain_NoEffect(t *testing.T) {
 	}
 }
 
-func TestMultipleTerrain_StackingRules(t *testing.T) {
+// --- Stacking ---
+
+func TestMultipleTerrain_CoverStacks(t *testing.T) {
 	b := board.NewBoard(48, 24)
-	// Two overlapping terrain pieces at same position
-	b.AddTerrain("Woods1", board.TerrainWoods, core.Position{X: 10, Y: 10}, 6, 6)
-	b.AddTerrain("Ruins1", board.TerrainRuins, core.Position{X: 12, Y: 12}, 4, 4)
+	// Two overlapping cover-granting terrain pieces
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 10, Y: 10}, 6, 6)
+	b.AddTerrain("Hill", board.TerrainArea, core.Position{X: 12, Y: 12}, 4, 4)
 	e := setupEngine(b)
 
-	// Defender is in both woods and ruins
+	// Defender is in both terrain pieces
 	defender := &core.Unit{
 		ID: 2,
 		Models: []core.Model{
@@ -226,31 +344,28 @@ func TestMultipleTerrain_StackingRules(t *testing.T) {
 		Defender: defender,
 		Weapon:   &core.Weapon{Name: "Bow", Range: 18},
 	}
-	e.Evaluate(rules.BeforeSaveRoll, ctx)
+	e.Evaluate(rules.BeforeHitRoll, ctx)
 
-	// Both woods (+1) and ruins (+1) should stack
-	if ctx.Modifiers.SaveMod != 2 {
-		t.Errorf("expected SaveMod +2 from stacked terrain, got %d", ctx.Modifiers.SaveMod)
+	// Both cover rules stack: -1 + -1 = -2
+	if ctx.Modifiers.HitMod != -2 {
+		t.Errorf("expected HitMod -2 from stacked cover, got %d", ctx.Modifiers.HitMod)
 	}
 }
 
+// --- Rule Count ---
+
 func TestTerrainRules_Count(t *testing.T) {
 	b := board.NewBoard(48, 24)
-	b.AddTerrain("Woods", board.TerrainWoods, core.Position{X: 0, Y: 0}, 4, 4)
-	b.AddTerrain("Wall", board.TerrainObstacle, core.Position{X: 10, Y: 10}, 2, 2)
-	b.AddTerrain("Ruins", board.TerrainRuins, core.Position{X: 20, Y: 20}, 3, 3)
-	b.AddTerrain("Lava", board.TerrainImpassable, core.Position{X: 30, Y: 0}, 2, 2)
-	b.AddTerrain("Field", board.TerrainOpen, core.Position{X: 40, Y: 0}, 4, 4)
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 0, Y: 0}, 4, 4)    // 3 rules: Cover + Obscuring + Unstable
+	b.AddTerrain("Wall", board.TerrainObstacle, core.Position{X: 10, Y: 10}, 2, 2)      // 2 rules: Cover + Unstable
+	b.AddTerrain("Hill", board.TerrainArea, core.Position{X: 20, Y: 20}, 3, 3)           // 1 rule: Cover
+	b.AddTerrain("Lava", board.TerrainImpassable, core.Position{X: 30, Y: 0}, 2, 2)     // 2 rules: BlockMove + BlockCharge
+	b.AddTerrain("Field", board.TerrainOpen, core.Position{X: 40, Y: 0}, 4, 4)           // 0 rules
 
 	rulesList := board.TerrainRules(b)
 
-	// Woods: 2 (move penalty + cover)
-	// Obstacle: 1 (cover ranged only)
-	// Ruins: 1 (cover)
-	// Impassable: 2 (block move + block charge)
-	// Open: 0
-	// Total: 6
-	expected := 6
+	// Obscuring: 3 + Obstacle: 2 + Area: 1 + Impassable: 2 + Open: 0 = 8
+	expected := 8
 	if len(rulesList) != expected {
 		t.Errorf("expected %d terrain rules, got %d", expected, len(rulesList))
 	}

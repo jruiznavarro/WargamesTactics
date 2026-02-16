@@ -203,6 +203,12 @@ func (p *CLIPlayer) displayUnitCard(u game.UnitView, showDetails bool) {
 	if u.HasMoved {
 		flags = append(flags, "MOVED")
 	}
+	if u.HasRun {
+		flags = append(flags, "RAN")
+	}
+	if u.HasRetreated {
+		flags = append(flags, "RETREATED")
+	}
 	if u.HasShot {
 		flags = append(flags, "SHOT")
 	}
@@ -256,6 +262,10 @@ func (p *CLIPlayer) displayPrompt(currentPhase phase.Phase) {
 		switch ct {
 		case command.CommandTypeMove:
 			fmt.Fprintf(p.writer, " move <id> <x> <y>")
+		case command.CommandTypeRun:
+			fmt.Fprintf(p.writer, " run <id> <x> <y>")
+		case command.CommandTypeRetreat:
+			fmt.Fprintf(p.writer, " retreat <id> <x> <y>")
 		case command.CommandTypeShoot:
 			fmt.Fprintf(p.writer, " shoot <id> <target>")
 		case command.CommandTypePileIn:
@@ -300,6 +310,56 @@ func (p *CLIPlayer) parseCommand(line string, currentPhase phase.Phase, view *ga
 			return nil, fmt.Errorf("invalid Y coordinate: %s", parts[3])
 		}
 		return &command.MoveCommand{
+			OwnerID:     p.id,
+			UnitID:      core.UnitID(unitID),
+			Destination: core.Position{X: x, Y: y},
+		}, nil
+
+	case "run":
+		if !currentPhase.IsCommandAllowed(command.CommandTypeRun) {
+			return nil, fmt.Errorf("run not allowed in %s", currentPhase.Type)
+		}
+		if len(parts) != 4 {
+			return nil, fmt.Errorf("usage: run <unit_id> <x> <y>")
+		}
+		unitID, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid unit ID: %s", parts[1])
+		}
+		x, err := strconv.ParseFloat(parts[2], 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid X coordinate: %s", parts[2])
+		}
+		y, err := strconv.ParseFloat(parts[3], 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Y coordinate: %s", parts[3])
+		}
+		return &command.RunCommand{
+			OwnerID:     p.id,
+			UnitID:      core.UnitID(unitID),
+			Destination: core.Position{X: x, Y: y},
+		}, nil
+
+	case "retreat":
+		if !currentPhase.IsCommandAllowed(command.CommandTypeRetreat) {
+			return nil, fmt.Errorf("retreat not allowed in %s", currentPhase.Type)
+		}
+		if len(parts) != 4 {
+			return nil, fmt.Errorf("usage: retreat <unit_id> <x> <y>")
+		}
+		unitID, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid unit ID: %s", parts[1])
+		}
+		x, err := strconv.ParseFloat(parts[2], 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid X coordinate: %s", parts[2])
+		}
+		y, err := strconv.ParseFloat(parts[3], 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Y coordinate: %s", parts[3])
+		}
+		return &command.RetreatCommand{
 			OwnerID:     p.id,
 			UnitID:      core.UnitID(unitID),
 			Destination: core.Position{X: x, Y: y},
@@ -393,7 +453,9 @@ func (p *CLIPlayer) parseCommand(line string, currentPhase phase.Phase, view *ga
 
 	case "help":
 		fmt.Fprintf(p.writer, "\n  Available commands:\n")
-		fmt.Fprintf(p.writer, "    move <unit_id> <x> <y>      Move unit to position\n")
+		fmt.Fprintf(p.writer, "    move <unit_id> <x> <y>       Move unit to position\n")
+		fmt.Fprintf(p.writer, "    run <unit_id> <x> <y>        Run (Move+D6\", no shoot/charge)\n")
+		fmt.Fprintf(p.writer, "    retreat <unit_id> <x> <y>    Retreat from combat (D3 mortal)\n")
 		fmt.Fprintf(p.writer, "    shoot <unit_id> <target_id>  Shoot at enemy unit\n")
 		fmt.Fprintf(p.writer, "    pilein <unit_id>             Pile in 3\" toward enemy\n")
 		fmt.Fprintf(p.writer, "    fight <unit_id> <target_id>  Melee attack enemy unit\n")

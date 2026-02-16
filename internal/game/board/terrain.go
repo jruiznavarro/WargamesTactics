@@ -2,25 +2,28 @@ package board
 
 import "github.com/jruiznavarro/wargamestactics/internal/game/core"
 
-// TerrainType identifies the kind of terrain feature.
+// TerrainType identifies terrain types per AoS4 Rule 1.4.
 type TerrainType int
 
 const (
-	TerrainObstacle   TerrainType = iota // Low walls, barricades -- cover for shooting
-	TerrainWoods                         // Dense forests -- cover + slows movement
-	TerrainRuins                         // Ruined buildings -- cover, defensible
-	TerrainImpassable                    // Lava, deep water, etc. -- blocks movement
-	TerrainOpen                          // Open ground -- no effect (decorative)
+	TerrainObstacle     TerrainType = iota // Ruins, debris, barricades: Cover + Unstable
+	TerrainObscuring                       // Wyldwood, fortress wall: Cover + Obscuring + Unstable
+	TerrainArea                            // Hills, Stormvault: Cover only
+	TerrainPlaceOfPower                    // Realmgate, Aqualith: Cover + Place of Power + Unstable
+	TerrainImpassable                      // Custom: blocks all movement
+	TerrainOpen                            // Open ground: no effect (decorative)
 )
 
 func (t TerrainType) String() string {
 	switch t {
 	case TerrainObstacle:
 		return "Obstacle"
-	case TerrainWoods:
-		return "Woods"
-	case TerrainRuins:
-		return "Ruins"
+	case TerrainObscuring:
+		return "Obscuring"
+	case TerrainArea:
+		return "Area"
+	case TerrainPlaceOfPower:
+		return "Place of Power"
 	case TerrainImpassable:
 		return "Impassable"
 	case TerrainOpen:
@@ -31,7 +34,6 @@ func (t TerrainType) String() string {
 }
 
 // TerrainFeature represents a terrain piece on the battlefield.
-// It is modeled as an axis-aligned rectangle for simplicity.
 type TerrainFeature struct {
 	ID     int
 	Name   string
@@ -60,10 +62,12 @@ func (t *TerrainFeature) Symbol() rune {
 	switch t.Type {
 	case TerrainObstacle:
 		return '#'
-	case TerrainWoods:
+	case TerrainObscuring:
 		return 'W'
-	case TerrainRuins:
-		return 'R'
+	case TerrainArea:
+		return 'H'
+	case TerrainPlaceOfPower:
+		return 'P'
 	case TerrainImpassable:
 		return 'X'
 	case TerrainOpen:
