@@ -241,6 +241,370 @@ func TestCombat_DestroyedUnitStopsAttacking(t *testing.T) {
 	}
 }
 
+func TestCritAutoWound_SkipsWoundRoll(t *testing.T) {
+	// Use many attacks to ensure some crits (6s) are rolled.
+	// With CritAutoWound, crits skip the wound roll.
+	// With ToWound=6 (very hard), normal hits will rarely wound,
+	// so most wounds should come from auto-wounds.
+	engine := newTestEngine()
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "AutoWoundWeapon", Attacks: 100, ToHit: 2, ToWound: 6, Rend: 5, Damage: 1,
+				Abilities: core.AbilityCritAutoWound},
+		},
+	}
+	defender := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 6},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 200, MaxWounds: 200, IsAlive: true},
+		},
+	}
+
+	roller := dice.NewRoller(42)
+	result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[0], false)
+
+	// With 100 attacks at ToHit 2+, about ~17 will be crits (natural 6).
+	// Those crits auto-wound, skipping the ToWound 6+ check.
+	// The remaining ~66 hits need ToWound 6+, so ~11 wound normally.
+	// Total wounds should be noticeably higher than if no auto-wound.
+	if result.CriticalHits == 0 {
+		t.Error("expected some critical hits with 100 attacks")
+	}
+	if result.Wounds < result.CriticalHits {
+		t.Errorf("auto-wounds should contribute to total wounds: wounds=%d, crits=%d",
+			result.Wounds, result.CriticalHits)
+	}
+
+	// Compare: same weapon WITHOUT CritAutoWound (just regular crits)
+	attacker2 := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "NormalWeapon", Attacks: 100, ToHit: 2, ToWound: 6, Rend: 5, Damage: 1},
+		},
+	}
+	defender2 := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 6},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 200, MaxWounds: 200, IsAlive: true},
+		},
+	}
+
+	roller2 := dice.NewRoller(42)
+	result2 := ResolveAttacks(roller2, engine, attacker2, defender2, &attacker2.Weapons[0], false)
+
+	if result.Wounds <= result2.Wounds {
+		t.Errorf("CritAutoWound should produce more wounds than normal: autoWound=%d, normal=%d",
+			result.Wounds, result2.Wounds)
+	}
+}
+
+func TestCompanion_IgnoresPositiveModifiers(t *testing.T) {
+	engine := rules.NewEngine()
+
+	// Add All-out Attack rule: +1 to hit
+	engine.AddRule(rules.Rule{
+		Name:    "AllOutAttack",
+		Trigger: rules.BeforeHitRoll,
+		Source:  rules.SourceGlobal,
+		Apply: func(ctx *rules.Context) {
+			ctx.Modifiers.HitMod += 1
+		},
+	})
+	// Add +1 wound modifier
+	engine.AddRule(rules.Rule{
+		Name:    "WoundBuff",
+		Trigger: rules.BeforeWoundRoll,
+		Source:  rules.SourceGlobal,
+		Apply: func(ctx *rules.Context) {
+			ctx.Modifiers.WoundMod += 1
+		},
+	})
+
+	// Companion weapon: should ignore the +1 hit and +1 wound
+	companionWeapon := core.Weapon{
+		Name: "Companion Fangs", Attacks: 100, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1,
+		Abilities: core.AbilityCompanion,
+	}
+	// Regular weapon: should benefit from +1 hit and +1 wound
+	regularWeapon := core.Weapon{
+		Name: "Regular Sword", Attacks: 100, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1,
+	}
+
+	makeAttacker := func() *core.Unit {
+		return &core.Unit{
+			ID: 1,
+			Models: []core.Model{
+				{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+			},
+		}
+	}
+	makeDefender := func() *core.Unit {
+		return &core.Unit{
+			ID:    2,
+			Stats: core.Stats{Save: 6},
+			Models: []core.Model{
+				{ID: 0, CurrentWounds: 500, MaxWounds: 500, IsAlive: true},
+			},
+		}
+	}
+
+	roller1 := dice.NewRoller(42)
+	companionResult := ResolveAttacks(roller1, engine, makeAttacker(), makeDefender(), &companionWeapon, false)
+
+	roller2 := dice.NewRoller(42)
+	regularResult := ResolveAttacks(roller2, engine, makeAttacker(), makeDefender(), &regularWeapon, false)
+
+	// Regular weapon should deal more damage because it benefits from +1 hit and +1 wound
+	if regularResult.DamageDealt <= companionResult.DamageDealt {
+		t.Errorf("regular weapon should deal more damage with buffs: regular=%d, companion=%d",
+			regularResult.DamageDealt, companionResult.DamageDealt)
+	}
+}
+
+func TestCompanion_NegativeModifiersStillApply(t *testing.T) {
+	engine := rules.NewEngine()
+
+	// Add cover: -1 to hit
+	engine.AddRule(rules.Rule{
+		Name:    "Cover",
+		Trigger: rules.BeforeHitRoll,
+		Source:  rules.SourceTerrain,
+		Apply: func(ctx *rules.Context) {
+			ctx.Modifiers.HitMod -= 1
+		},
+	})
+
+	companionWeapon := core.Weapon{
+		Name: "Companion Fangs", Attacks: 100, ToHit: 3, ToWound: 3, Rend: 3, Damage: 1,
+		Abilities: core.AbilityCompanion,
+	}
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+	defender := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 6},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 500, MaxWounds: 500, IsAlive: true},
+		},
+	}
+
+	// With cover
+	roller1 := dice.NewRoller(42)
+	withCover := ResolveAttacks(roller1, engine, attacker, defender, &companionWeapon, false)
+
+	// Without cover
+	attacker2 := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+	defender2 := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 6},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 500, MaxWounds: 500, IsAlive: true},
+		},
+	}
+	engine2 := rules.NewEngine()
+	roller2 := dice.NewRoller(42)
+	withoutCover := ResolveAttacks(roller2, engine2, attacker2, defender2, &companionWeapon, false)
+
+	// Companion should still be affected by the -1 penalty
+	if withCover.DamageDealt >= withoutCover.DamageDealt {
+		t.Errorf("companion should still suffer from -1 hit: withCover=%d, without=%d",
+			withCover.DamageDealt, withoutCover.DamageDealt)
+	}
+}
+
+func TestPostCombatTriggers_OnModelSlain(t *testing.T) {
+	engine := rules.NewEngine()
+	slainCount := 0
+
+	engine.AddRule(rules.Rule{
+		Name:    "TrackSlain",
+		Trigger: rules.OnModelSlain,
+		Source:  rules.SourceGlobal,
+		Apply: func(ctx *rules.Context) {
+			slainCount = ctx.Modifiers.AttacksMod // Carries models slain count
+		},
+	})
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "Overkill", Range: 0, Attacks: 50, ToHit: 2, ToWound: 2, Rend: 5, Damage: 3},
+		},
+	}
+	defender := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 6, Health: 1},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+			{ID: 1, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+			{ID: 2, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	roller := dice.NewRoller(42)
+	ResolveCombat(roller, engine, attacker, defender)
+
+	if slainCount == 0 {
+		t.Error("OnModelSlain trigger should have fired with slain count")
+	}
+}
+
+func TestPostCombatTriggers_OnUnitDestroyed(t *testing.T) {
+	engine := rules.NewEngine()
+	destroyed := false
+
+	engine.AddRule(rules.Rule{
+		Name:    "TrackDestroyed",
+		Trigger: rules.OnUnitDestroyed,
+		Source:  rules.SourceGlobal,
+		Apply: func(ctx *rules.Context) {
+			destroyed = true
+		},
+	})
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "Overkill", Range: 0, Attacks: 50, ToHit: 2, ToWound: 2, Rend: 5, Damage: 10},
+		},
+	}
+	defender := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 6, Health: 1},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	roller := dice.NewRoller(42)
+	ResolveCombat(roller, engine, attacker, defender)
+
+	if !destroyed {
+		t.Error("OnUnitDestroyed trigger should have fired")
+	}
+	if !defender.IsDestroyed() {
+		t.Error("defender should be destroyed")
+	}
+}
+
+func TestPostCombatTriggers_AfterCombatResolve(t *testing.T) {
+	engine := rules.NewEngine()
+	triggered := false
+
+	engine.AddRule(rules.Rule{
+		Name:    "TrackAfterCombat",
+		Trigger: rules.AfterCombatResolve,
+		Source:  rules.SourceGlobal,
+		Apply: func(ctx *rules.Context) {
+			triggered = true
+		},
+	})
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "Sword", Range: 0, Attacks: 1, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1},
+		},
+	}
+	defender := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 4, Health: 10},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 10, MaxWounds: 10, IsAlive: true},
+		},
+	}
+
+	roller := dice.NewRoller(42)
+	ResolveCombat(roller, engine, attacker, defender)
+
+	if !triggered {
+		t.Error("AfterCombatResolve trigger should have fired")
+	}
+}
+
+func TestWardSave_ReducesDamage(t *testing.T) {
+	engine := newTestEngine()
+
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "Test", Attacks: 100, ToHit: 2, ToWound: 2, Rend: 5, Damage: 1},
+		},
+	}
+
+	// Defender with ward save 5+
+	defenderWithWard := &core.Unit{
+		ID:       2,
+		Stats:    core.Stats{Save: 6, Health: 1},
+		WardSave: 5,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 500, MaxWounds: 500, IsAlive: true},
+		},
+	}
+	roller1 := dice.NewRoller(42)
+	resultWard := ResolveAttacks(roller1, engine, attacker, defenderWithWard, &attacker.Weapons[0], false)
+
+	// Defender without ward
+	attacker2 := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+		Weapons: []core.Weapon{
+			{Name: "Test", Attacks: 100, ToHit: 2, ToWound: 2, Rend: 5, Damage: 1},
+		},
+	}
+	defenderNoWard := &core.Unit{
+		ID:    2,
+		Stats: core.Stats{Save: 6, Health: 1},
+		Models: []core.Model{
+			{ID: 0, CurrentWounds: 500, MaxWounds: 500, IsAlive: true},
+		},
+	}
+	roller2 := dice.NewRoller(42)
+	resultNoWard := ResolveAttacks(roller2, engine, attacker2, defenderNoWard, &attacker2.Weapons[0], false)
+
+	if resultWard.WardSaved == 0 {
+		t.Error("ward save should have prevented some damage")
+	}
+	if resultWard.DamageDealt >= resultNoWard.DamageDealt {
+		t.Errorf("ward save should reduce damage: with ward=%d, without=%d",
+			resultWard.DamageDealt, resultNoWard.DamageDealt)
+	}
+}
+
 func TestResolveAttacks_WithRuleModifiers(t *testing.T) {
 	roller := dice.NewRoller(42)
 	engine := rules.NewEngine()

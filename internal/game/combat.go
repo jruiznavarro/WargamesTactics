@@ -82,20 +82,30 @@ func ResolveAttacks(roller *dice.Roller, engine *rules.Engine, attacker *core.Un
 		TotalAttacks: totalAttacks,
 	}
 
+	// Companion weapons ignore positive hit/wound modifiers from abilities (Rule 20.0)
+	isCompanion := weapon.HasAbility(core.AbilityCompanion)
+
 	// Step 1: Hit rolls with modifier caps (Rule 17.1)
 	hitCtx := &rules.Context{Attacker: attacker, Defender: defender, Weapon: weapon, IsShooting: isShooting}
 	engine.Evaluate(rules.BeforeHitRoll, hitCtx)
 	hitMod := clampHitWoundMod(hitCtx.Modifiers.HitMod)
+	if isCompanion && hitMod > 0 {
+		hitMod = 0
+	}
 
-	hits, crits, critMortals := rollHits(roller, totalAttacks, weapon.ToHit, hitMod, weapon)
-	result.Hits = hits
-	result.CriticalHits = crits
+	hr := rollHits(roller, totalAttacks, weapon.ToHit, hitMod, weapon)
+	result.Hits = hr.Hits + hr.AutoWounds // Total hits for display
+	result.CriticalHits = hr.Crits
 
 	// Step 2: Wound rolls with modifier caps (Rule 17.1)
+	// Only normal hits go through wound rolls; auto-wounds skip this step
 	woundCtx := &rules.Context{Attacker: attacker, Defender: defender, Weapon: weapon, IsShooting: isShooting}
 	engine.Evaluate(rules.BeforeWoundRoll, woundCtx)
 	woundMod := clampHitWoundMod(woundCtx.Modifiers.WoundMod)
-	wounds := rollWounds(roller, hits, weapon.ToWound, woundMod)
+	if isCompanion && woundMod > 0 {
+		woundMod = 0
+	}
+	wounds := rollWounds(roller, hr.Hits, weapon.ToWound, woundMod) + hr.AutoWounds
 	result.Wounds = wounds
 
 	// Step 3: Save rolls with modifier caps (Rule 17.1)
@@ -127,7 +137,7 @@ func ResolveAttacks(roller *dice.Roller, engine *rules.Engine, attacker *core.Un
 	damagePool := savesFailed * damagePerWound
 
 	// Add mortal wounds from Crit (Mortal) and rules
-	totalMortals := critMortals +
+	totalMortals := hr.CritMortals +
 		baseCtx.Modifiers.MortalWounds +
 		hitCtx.Modifiers.MortalWounds +
 		woundCtx.Modifiers.MortalWounds +
@@ -174,6 +184,7 @@ func ResolveMortalWounds(roller *dice.Roller, defender *core.Unit, mortalWounds 
 // ResolveCombat resolves all melee weapon attacks from attacker against defender.
 func ResolveCombat(roller *dice.Roller, engine *rules.Engine, attacker *core.Unit, defender *core.Unit) []CombatResult {
 	var results []CombatResult
+	defenderAliveStart := defender.AliveModels()
 	for _, idx := range attacker.MeleeWeapons() {
 		if attacker.IsDestroyed() || defender.IsDestroyed() {
 			break
@@ -181,12 +192,14 @@ func ResolveCombat(roller *dice.Roller, engine *rules.Engine, attacker *core.Uni
 		result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[idx], false)
 		results = append(results, result)
 	}
+	fireCombatTriggers(engine, attacker, defender, results, defenderAliveStart, false)
 	return results
 }
 
 // ResolveShooting resolves all ranged weapon attacks from attacker against defender.
 func ResolveShooting(roller *dice.Roller, engine *rules.Engine, attacker *core.Unit, defender *core.Unit) []CombatResult {
 	var results []CombatResult
+	defenderAliveStart := defender.AliveModels()
 	for _, idx := range attacker.RangedWeapons() {
 		if attacker.IsDestroyed() || defender.IsDestroyed() {
 			break
@@ -194,7 +207,47 @@ func ResolveShooting(roller *dice.Roller, engine *rules.Engine, attacker *core.U
 		result := ResolveAttacks(roller, engine, attacker, defender, &attacker.Weapons[idx], true)
 		results = append(results, result)
 	}
+	fireCombatTriggers(engine, attacker, defender, results, defenderAliveStart, true)
 	return results
+}
+
+// fireCombatTriggers fires post-combat events via the rules engine.
+func fireCombatTriggers(engine *rules.Engine, attacker *core.Unit, defender *core.Unit, results []CombatResult, defenderAliveStart int, isShooting bool) {
+	totalSlain := defenderAliveStart - defender.AliveModels()
+
+	// AfterCombatResolve — always fires after a combat resolution
+	totalDamage := 0
+	for _, r := range results {
+		totalDamage += r.DamageDealt
+	}
+	afterCtx := &rules.Context{
+		Attacker:   attacker,
+		Defender:   defender,
+		IsShooting: isShooting,
+	}
+	afterCtx.Modifiers.DamageMod = totalDamage // Reuse as "total damage dealt" info
+	engine.Evaluate(rules.AfterCombatResolve, afterCtx)
+
+	// OnModelSlain — fires once per model slain
+	if totalSlain > 0 {
+		slainCtx := &rules.Context{
+			Attacker:   attacker,
+			Defender:   defender,
+			IsShooting: isShooting,
+		}
+		slainCtx.Modifiers.AttacksMod = totalSlain // Reuse as "models slain count" info
+		engine.Evaluate(rules.OnModelSlain, slainCtx)
+	}
+
+	// OnUnitDestroyed — fires if the defender was fully destroyed
+	if defender.IsDestroyed() {
+		destroyedCtx := &rules.Context{
+			Attacker:   attacker,
+			Defender:   defender,
+			IsShooting: isShooting,
+		}
+		engine.Evaluate(rules.OnUnitDestroyed, destroyedCtx)
+	}
 }
 
 // applyAntiRend calculates extra Rend from Anti-X weapon abilities (Rule 20.0).
@@ -218,10 +271,19 @@ func applyAntiRend(weapon *core.Weapon, defender *core.Unit) int {
 	return extra
 }
 
+// hitResult holds the output of rollHits.
+type hitResult struct {
+	Hits        int // Normal hits that proceed to wound roll
+	Crits       int // Critical hit count (for tracking)
+	CritMortals int // Mortal wounds from Crit(Mortal)
+	AutoWounds  int // Auto-wounds from Crit(Auto-wound), skip wound roll -> go to save
+}
+
 // rollHits rolls D6s for hits. AoS4 Rule 17.0:
 // Natural 1 always fails. Unmodified 6 = critical hit.
-// Processes Crit weapon abilities. Returns (hits, crits, critMortals).
-func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int, weapon *core.Weapon) (hits, crits, critMortals int) {
+// Processes Crit weapon abilities.
+func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int, weapon *core.Weapon) hitResult {
+	var r hitResult
 	for i := 0; i < numAttacks; i++ {
 		roll := roller.RollD6()
 
@@ -233,8 +295,15 @@ func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int, weapon *core
 
 		// Crit (Mortal): inflict mortal damage = weapon Damage, attack sequence ends
 		if isCrit && weapon.HasAbility(core.AbilityCritMortal) {
-			critMortals += weapon.Damage
-			crits++
+			r.CritMortals += weapon.Damage
+			r.Crits++
+			continue
+		}
+
+		// Crit (Auto-wound): automatically wounds, skips wound roll -> goes to save
+		if isCrit && weapon.HasAbility(core.AbilityCritAutoWound) {
+			r.AutoWounds++
+			r.Crits++
 			continue
 		}
 
@@ -243,20 +312,20 @@ func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int, weapon *core
 		// Crit (2 Hits): scores 2 hits instead of 1
 		if isCrit && weapon.HasAbility(core.AbilityCrit2Hits) {
 			if modifiedRoll >= toHit {
-				hits += 2
-				crits++
+				r.Hits += 2
+				r.Crits++
 			}
 			continue
 		}
 
 		if modifiedRoll >= toHit {
-			hits++
+			r.Hits++
 			if isCrit {
-				crits++
+				r.Crits++
 			}
 		}
 	}
-	return
+	return r
 }
 
 // rollWounds rolls D6s for wounds. Natural 1 always fails.
