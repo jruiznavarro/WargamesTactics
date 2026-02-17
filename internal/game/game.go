@@ -7,6 +7,7 @@ import (
 
 	"github.com/jruiznavarro/wargamestactics/internal/game/board"
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
+	"github.com/jruiznavarro/wargamestactics/internal/game/commands"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/phase"
 	"github.com/jruiznavarro/wargamestactics/internal/game/rules"
@@ -20,6 +21,7 @@ type Game struct {
 	Players        []Player
 	Roller         *dice.Roller
 	Rules          *rules.Engine
+	Commands       *commands.CommandTracker
 	BattleRound    int
 	CurrentPhase   phase.PhaseType
 	ActivePlayer   int // Index into Players slice
@@ -37,6 +39,7 @@ func NewGame(seed int64, boardWidth, boardHeight float64) *Game {
 		Units:      make(map[core.UnitID]*core.Unit),
 		Roller:     dice.NewRoller(seed),
 		Rules:      rules.NewEngine(),
+		Commands:   commands.NewCommandTracker(),
 		NextUnitID: 1,
 		Winner:     -1,
 	}
@@ -171,14 +174,22 @@ func (g *Game) View(playerID int) *GameView {
 		})
 	}
 
+	cpMap := make(map[int]int)
+	for _, p := range g.Players {
+		if state := g.Commands.GetState(p.ID()); state != nil {
+			cpMap[p.ID()] = state.CommandPoints
+		}
+	}
+
 	return &GameView{
-		Units:        unitsByOwner,
-		Terrain:      terrainViews,
-		BoardWidth:   g.Board.Width,
-		BoardHeight:  g.Board.Height,
-		CurrentPhase: g.CurrentPhase,
-		BattleRound:  g.BattleRound,
-		ActivePlayer: g.ActivePlayer,
+		Units:         unitsByOwner,
+		Terrain:       terrainViews,
+		BoardWidth:    g.Board.Width,
+		BoardHeight:   g.Board.Height,
+		CurrentPhase:  g.CurrentPhase,
+		BattleRound:   g.BattleRound,
+		ActivePlayer:  g.ActivePlayer,
+		CommandPoints: cpMap,
 	}
 }
 
@@ -975,6 +986,7 @@ func (g *Game) runPlayerTurn(playerIdx int) {
 		}
 
 		g.CurrentPhase = p.Type
+		g.Commands.ResetPhase()
 		g.Logf("  -- %s --", p.Type)
 
 		if p.Alternating {
@@ -982,6 +994,9 @@ func (g *Game) runPlayerTurn(playerIdx int) {
 		} else {
 			g.runPlayerPhase(playerIdx, p)
 		}
+
+		// Clean up temporary rules from commands (All-out Attack/Defence)
+		g.CleanupPhaseRules()
 	}
 }
 
@@ -998,6 +1013,27 @@ func (g *Game) RunGame(maxRounds int) {
 
 		first, second := g.rollOffPriority()
 		g.PriorityPlayer = first
+
+		// Initialize command points: 4 CP each, underdog gets +1
+		// Underdog = player with fewer total wounds remaining (-1 = no underdog)
+		underdogID := g.determineUnderdog()
+		playerIDs := make([]int, len(g.Players))
+		for i, p := range g.Players {
+			playerIDs[i] = p.ID()
+		}
+		g.Commands.InitRound(playerIDs, 4, underdogID)
+
+		if underdogID >= 0 {
+			for _, p := range g.Players {
+				if p.ID() == underdogID {
+					g.Logf("  %s is the underdog (+1 CP)", p.Name())
+				}
+			}
+		}
+		for _, p := range g.Players {
+			state := g.Commands.GetState(p.ID())
+			g.Logf("  %s: %d CP", p.Name(), state.CommandPoints)
+		}
 
 		g.ResetTurnFlags()
 		g.runPlayerTurn(first)
@@ -1016,4 +1052,260 @@ func (g *Game) RunGame(maxRounds int) {
 		g.Logf("Game ended after %d battle rounds", maxRounds)
 		g.IsOver = true
 	}
+}
+
+// determineUnderdog returns the player ID with fewer total wounds, or -1 if tied.
+func (g *Game) determineUnderdog() int {
+	if len(g.Players) < 2 {
+		return -1
+	}
+	woundsPerPlayer := make(map[int]int)
+	for _, u := range g.Units {
+		if !u.IsDestroyed() {
+			woundsPerPlayer[u.OwnerID] += u.TotalCurrentWounds()
+		}
+	}
+
+	p0 := g.Players[0].ID()
+	p1 := g.Players[1].ID()
+	w0 := woundsPerPlayer[p0]
+	w1 := woundsPerPlayer[p1]
+
+	if w0 < w1 {
+		return p0
+	} else if w1 < w0 {
+		return p1
+	}
+	return -1
+}
+
+// UseCommand validates and executes a command ability for a player.
+func (g *Game) UseCommand(playerID int, cmdID commands.CommandID, unitID core.UnitID) error {
+	state := g.Commands.GetState(playerID)
+	if state == nil {
+		return fmt.Errorf("no command state for player %d", playerID)
+	}
+
+	unit := g.GetUnit(unitID)
+	if unit == nil {
+		return fmt.Errorf("unit %d not found", unitID)
+	}
+	if unit.OwnerID != playerID {
+		return fmt.Errorf("unit %d does not belong to player %d", unitID, playerID)
+	}
+
+	if err := state.Spend(cmdID, unitID); err != nil {
+		return err
+	}
+
+	def := commands.Registry[cmdID]
+	g.Logf("  [CMD] %s uses %s on %s (%d CP remaining)",
+		g.playerName(playerID), def.Name, unit.Name, state.CommandPoints)
+
+	return nil
+}
+
+// ExecuteRally performs the Rally command: 6D6, each 4+ = 1 rally point.
+// Rally points can heal 1 wound (cost 1) or return a slain model (cost = Health stat).
+func (g *Game) ExecuteRally(playerID int, unitID core.UnitID) (int, error) {
+	unit := g.GetUnit(unitID)
+	if unit == nil {
+		return 0, fmt.Errorf("unit %d not found", unitID)
+	}
+	if g.isEngaged(unit) {
+		return 0, fmt.Errorf("cannot rally a unit in combat")
+	}
+
+	if err := g.UseCommand(playerID, commands.CmdRally, unitID); err != nil {
+		return 0, err
+	}
+
+	rallyPoints := 0
+	for i := 0; i < 6; i++ {
+		roll := g.Roller.RollD6()
+		if roll >= 4 {
+			rallyPoints++
+		}
+	}
+
+	g.Logf("    Rally: %d points earned", rallyPoints)
+
+	healed := 0
+	remaining := rallyPoints
+
+	// First try to return slain models
+	for i := range unit.Models {
+		if remaining <= 0 {
+			break
+		}
+		if !unit.Models[i].IsAlive && remaining >= unit.Stats.Health {
+			unit.Models[i].IsAlive = true
+			unit.Models[i].CurrentWounds = unit.Stats.Health
+			remaining -= unit.Stats.Health
+			healed += unit.Stats.Health
+			g.Logf("    Returned slain model (cost %d points)", unit.Stats.Health)
+		}
+	}
+
+	// Then heal wounded models
+	for i := range unit.Models {
+		if remaining <= 0 {
+			break
+		}
+		if unit.Models[i].IsAlive && unit.Models[i].CurrentWounds < unit.Models[i].MaxWounds {
+			unit.Models[i].CurrentWounds++
+			remaining--
+			healed++
+			g.Logf("    Healed 1 wound")
+		}
+	}
+
+	return healed, nil
+}
+
+// ApplyAllOutAttack applies +1 hit modifier via the rules engine for one attack.
+func (g *Game) ApplyAllOutAttack(playerID int, unitID core.UnitID) error {
+	if err := g.UseCommand(playerID, commands.CmdAllOutAttack, unitID); err != nil {
+		return err
+	}
+
+	unit := g.GetUnit(unitID)
+	g.Rules.AddRule(rules.Rule{
+		Name:    fmt.Sprintf("AllOutAttack_%d", unitID),
+		Trigger: rules.BeforeHitRoll,
+		Source:  rules.SourceGlobal,
+		Condition: func(ctx *rules.Context) bool {
+			return ctx.Attacker != nil && ctx.Attacker.ID == unitID
+		},
+		Apply: func(ctx *rules.Context) {
+			ctx.Modifiers.HitMod += 1
+		},
+	})
+
+	g.Logf("    %s gains +1 to hit rolls this phase", unit.Name)
+	return nil
+}
+
+// ApplyAllOutDefence applies +1 save modifier via the rules engine for one phase.
+func (g *Game) ApplyAllOutDefence(playerID int, unitID core.UnitID) error {
+	if err := g.UseCommand(playerID, commands.CmdAllOutDefence, unitID); err != nil {
+		return err
+	}
+
+	unit := g.GetUnit(unitID)
+	g.Rules.AddRule(rules.Rule{
+		Name:    fmt.Sprintf("AllOutDefence_%d", unitID),
+		Trigger: rules.BeforeSaveRoll,
+		Source:  rules.SourceGlobal,
+		Condition: func(ctx *rules.Context) bool {
+			return ctx.Defender != nil && ctx.Defender.ID == unitID
+		},
+		Apply: func(ctx *rules.Context) {
+			ctx.Modifiers.SaveMod += 1
+		},
+	})
+
+	g.Logf("    %s gains +1 to save rolls this phase", unit.Name)
+	return nil
+}
+
+// ExecuteRedeploy performs the Redeploy command: unit moves up to D6" in enemy movement phase.
+func (g *Game) ExecuteRedeploy(playerID int, unitID core.UnitID, destination core.Position) error {
+	unit := g.GetUnit(unitID)
+	if unit == nil {
+		return fmt.Errorf("unit %d not found", unitID)
+	}
+	if g.isEngaged(unit) {
+		return fmt.Errorf("cannot redeploy a unit in combat")
+	}
+	if !g.Board.IsInBounds(destination) {
+		return fmt.Errorf("destination out of bounds")
+	}
+
+	if err := g.UseCommand(playerID, commands.CmdRedeploy, unitID); err != nil {
+		return err
+	}
+
+	redeployDist := float64(g.Roller.RollD6())
+	origin := unit.Position()
+	dist := core.Distance(origin, destination)
+
+	if dist > redeployDist {
+		return fmt.Errorf("redeploy distance %.1f exceeds D6 roll %.0f", dist, redeployDist)
+	}
+
+	if g.wouldEngageEnemy(unit, destination) {
+		return fmt.Errorf("cannot end redeploy within 3\" of enemy")
+	}
+
+	for i := range unit.Models {
+		if unit.Models[i].IsAlive {
+			unit.Models[i].Position = destination
+		}
+	}
+
+	g.Logf("    %s redeployed %.1f\" (max %.0f\")", unit.Name, dist, redeployDist)
+	return nil
+}
+
+// ExecuteForwardToVictory re-rolls a charge. Returns new charge roll.
+func (g *Game) ExecuteForwardToVictory(playerID int, unitID core.UnitID) (int, error) {
+	if err := g.UseCommand(playerID, commands.CmdForwardToVictory, unitID); err != nil {
+		return 0, err
+	}
+
+	newRoll := g.Roller.Roll2D6()
+	unit := g.GetUnit(unitID)
+	g.Logf("    %s re-rolls charge: %d", unit.Name, newRoll)
+	return newRoll, nil
+}
+
+// ExecutePowerThrough performs the Power Through command.
+func (g *Game) ExecutePowerThrough(playerID int, unitID core.UnitID, targetID core.UnitID) error {
+	unit := g.GetUnit(unitID)
+	if unit == nil {
+		return fmt.Errorf("unit %d not found", unitID)
+	}
+	if !unit.HasCharged {
+		return fmt.Errorf("unit must have charged this turn")
+	}
+
+	target := g.GetUnit(targetID)
+	if target == nil {
+		return fmt.Errorf("target %d not found", targetID)
+	}
+	if target.Stats.Health >= unit.Stats.Health {
+		return fmt.Errorf("target Health (%d) must be lower than unit Health (%d)",
+			target.Stats.Health, unit.Stats.Health)
+	}
+
+	dist := core.Distance(unit.Position(), target.Position())
+	if dist > 3.0 {
+		return fmt.Errorf("target not in combat range")
+	}
+
+	if err := g.UseCommand(playerID, commands.CmdPowerThrough, unitID); err != nil {
+		return err
+	}
+
+	mortalDmg := g.Roller.RollD3()
+	g.Logf("    Power Through: %s deals %d mortal damage to %s", unit.Name, mortalDmg, target.Name)
+	ResolveMortalWounds(g.Roller, target, mortalDmg)
+
+	g.CheckVictory()
+	return nil
+}
+
+// CleanupPhaseRules removes temporary rules added by commands (All-out Attack/Defence).
+func (g *Game) CleanupPhaseRules() {
+	g.Rules.RemoveRulesBySource(rules.SourceGlobal, "")
+}
+
+func (g *Game) playerName(playerID int) string {
+	for _, p := range g.Players {
+		if p.ID() == playerID {
+			return p.Name()
+		}
+	}
+	return fmt.Sprintf("Player %d", playerID)
 }

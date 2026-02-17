@@ -17,13 +17,15 @@ func (e *Engine) AddRule(r Rule) {
 	e.rules[r.Trigger] = append(e.rules[r.Trigger], r)
 }
 
-// RemoveRulesBySource removes all rules from a given source.
-// Useful when terrain is removed or a buff expires.
+// RemoveRulesBySource removes rules from a given source.
+// If name is empty, removes all rules from that source.
+// If name is provided, only removes rules matching both source and name.
 func (e *Engine) RemoveRulesBySource(source Source, name string) {
 	for trigger, ruleList := range e.rules {
 		filtered := ruleList[:0]
 		for _, r := range ruleList {
-			if !(r.Source == source && r.Name == name) {
+			match := r.Source == source && (name == "" || r.Name == name)
+			if !match {
 				filtered = append(filtered, r)
 			}
 		}

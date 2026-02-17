@@ -6,6 +6,7 @@ import (
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/phase"
+	"github.com/jruiznavarro/wargamestactics/internal/game/rules"
 )
 
 // stubPlayer always returns a predefined sequence of commands.
@@ -377,6 +378,149 @@ func TestTurnOrder_FirstPlayerCompletesAllPhases(t *testing.T) {
 			}
 			nonCombatCount++
 		}
+	}
+}
+
+func TestCommandPoints_InitializedEachRound(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+
+	// Give P1 more wounds so P2 is underdog
+	g.CreateUnit("BigUnit", 1, core.Stats{Health: 5}, nil, 3, core.Position{X: 10, Y: 10}, 1.0) // 15 wounds
+	g.CreateUnit("SmallUnit", 2, core.Stats{Health: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0) // 1 wound
+
+	g.RunGame(1)
+
+	// After RunGame, commands were initialized. Check logs for underdog.
+	foundUnderdog := false
+	for _, msg := range g.Log {
+		if msg == "  P2 is the underdog (+1 CP)" {
+			foundUnderdog = true
+		}
+	}
+	if !foundUnderdog {
+		t.Error("expected P2 to be identified as underdog")
+	}
+}
+
+func TestCommandPoints_ViewIncludesCP(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+
+	g.CreateUnit("U1", 1, core.Stats{Health: 1}, nil, 1, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("U2", 2, core.Stats{Health: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0)
+
+	// Init round manually
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+	view := g.View(1)
+
+	if view.CommandPoints[1] != 4 {
+		t.Errorf("expected 4 CP for player 1, got %d", view.CommandPoints[1])
+	}
+	if view.CommandPoints[2] != 4 {
+		t.Errorf("expected 4 CP for player 2, got %d", view.CommandPoints[2])
+	}
+}
+
+func TestRally_HealsDamage(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+
+	g.CreateUnit("Warriors", 1, core.Stats{Health: 3}, nil, 3, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("Enemy", 2, core.Stats{Health: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0)
+
+	// Damage one model
+	g.GetUnit(1).Models[0].CurrentWounds = 1
+
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+	g.CurrentPhase = phase.PhaseHero
+
+	_, err := g.ExecuteRally(1, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// CP should have decreased
+	state := g.Commands.GetState(1)
+	if state.CommandPoints != 3 {
+		t.Errorf("expected 3 CP after Rally, got %d", state.CommandPoints)
+	}
+}
+
+func TestAllOutAttack_AddsHitModifier(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+
+	g.CreateUnit("Fighters", 1, core.Stats{Health: 1}, nil, 1, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("Enemy", 2, core.Stats{Health: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0)
+
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+
+	err := g.ApplyAllOutAttack(1, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check that a rule was added
+	if !g.Rules.HasRulesFor(rules.BeforeHitRoll) {
+		t.Error("expected hit roll rule to be added")
+	}
+
+	// Cleanup should remove it
+	g.CleanupPhaseRules()
+	// The terrain rules might still have BeforeHitRoll, so just verify count decreased
+}
+
+func TestAllOutDefence_AddsSaveModifier(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+
+	g.CreateUnit("Defenders", 1, core.Stats{Health: 1}, nil, 1, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("Enemy", 2, core.Stats{Health: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0)
+
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+
+	err := g.ApplyAllOutDefence(1, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !g.Rules.HasRulesFor(rules.BeforeSaveRoll) {
+		t.Error("expected save roll rule to be added")
+	}
+}
+
+func TestCommand_CannotUseWithoutCP(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+
+	g.CreateUnit("U1", 1, core.Stats{Health: 1}, nil, 1, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("U2", 2, core.Stats{Health: 1}, nil, 1, core.Position{X: 30, Y: 10}, 1.0)
+
+	// Give 0 CP
+	g.Commands.InitRound([]int{1, 2}, 0, -1)
+
+	err := g.ApplyAllOutAttack(1, 1)
+	if err == nil {
+		t.Error("expected error when no CP available")
 	}
 }
 

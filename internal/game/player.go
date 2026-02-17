@@ -25,13 +25,14 @@ type TerrainView struct {
 
 // GameView provides a read-only snapshot of the game state.
 type GameView struct {
-	Units        map[int][]UnitView
-	Terrain      []TerrainView
-	BoardWidth   float64
-	BoardHeight  float64
-	CurrentPhase phase.PhaseType
-	BattleRound  int
-	ActivePlayer int
+	Units         map[int][]UnitView
+	Terrain       []TerrainView
+	BoardWidth    float64
+	BoardHeight   float64
+	CurrentPhase  phase.PhaseType
+	BattleRound   int
+	ActivePlayer  int
+	CommandPoints map[int]int // CP remaining per player ID
 }
 
 // UnitView is a read-only view of a unit.
