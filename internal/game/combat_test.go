@@ -667,3 +667,101 @@ func TestResolveAttacks_WithRuleModifiers(t *testing.T) {
 			resultWithCover.DamageDealt, resultWithout.DamageDealt)
 	}
 }
+
+// --- Re-roll Tests (Rule 2.2, Errata Jan 2026) ---
+
+func TestRerollHit_IncreasesDamage(t *testing.T) {
+	engine := rules.NewEngine()
+
+	// Add re-roll failed hits rule
+	engine.AddRule(rules.Rule{
+		Name:    "RerollFailedHits",
+		Trigger: rules.BeforeHitRoll,
+		Source:  rules.SourceGlobal,
+		Apply: func(ctx *rules.Context) {
+			ctx.RerollHit = dice.RerollFailed
+		},
+	})
+
+	makeAttacker := func() *core.Unit {
+		return &core.Unit{
+			ID: 1,
+			Models: []core.Model{
+				{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+			},
+			Weapons: []core.Weapon{
+				{Name: "Sword", Attacks: 100, ToHit: 4, ToWound: 2, Rend: 5, Damage: 1},
+			},
+		}
+	}
+	makeDefender := func() *core.Unit {
+		return &core.Unit{
+			ID:    2,
+			Stats: core.Stats{Save: 6},
+			Models: []core.Model{
+				{ID: 0, CurrentWounds: 500, MaxWounds: 500, IsAlive: true},
+			},
+		}
+	}
+
+	roller1 := dice.NewRoller(42)
+	withReroll := ResolveAttacks(roller1, engine, makeAttacker(), makeDefender(), &makeAttacker().Weapons[0], false)
+
+	engine2 := rules.NewEngine() // No re-roll
+	roller2 := dice.NewRoller(42)
+	withoutReroll := ResolveAttacks(roller2, engine2, makeAttacker(), makeDefender(), &makeAttacker().Weapons[0], false)
+
+	// Re-rolling failed hits should result in more damage
+	if withReroll.DamageDealt <= withoutReroll.DamageDealt {
+		t.Errorf("re-rolling failed hits should increase damage: with=%d, without=%d",
+			withReroll.DamageDealt, withoutReroll.DamageDealt)
+	}
+}
+
+func TestRerollSave_ReducesDamage(t *testing.T) {
+	engine := rules.NewEngine()
+
+	// Add re-roll failed saves rule
+	engine.AddRule(rules.Rule{
+		Name:    "RerollFailedSaves",
+		Trigger: rules.BeforeSaveRoll,
+		Source:  rules.SourceGlobal,
+		Apply: func(ctx *rules.Context) {
+			ctx.RerollSave = dice.RerollFailed
+		},
+	})
+
+	makeAttacker := func() *core.Unit {
+		return &core.Unit{
+			ID: 1,
+			Models: []core.Model{
+				{ID: 0, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+			},
+			Weapons: []core.Weapon{
+				{Name: "Sword", Attacks: 100, ToHit: 2, ToWound: 2, Rend: 0, Damage: 1},
+			},
+		}
+	}
+	makeDefender := func() *core.Unit {
+		return &core.Unit{
+			ID:    2,
+			Stats: core.Stats{Save: 4},
+			Models: []core.Model{
+				{ID: 0, CurrentWounds: 500, MaxWounds: 500, IsAlive: true},
+			},
+		}
+	}
+
+	roller1 := dice.NewRoller(42)
+	withReroll := ResolveAttacks(roller1, engine, makeAttacker(), makeDefender(), &makeAttacker().Weapons[0], false)
+
+	engine2 := rules.NewEngine()
+	roller2 := dice.NewRoller(42)
+	withoutReroll := ResolveAttacks(roller2, engine2, makeAttacker(), makeDefender(), &makeAttacker().Weapons[0], false)
+
+	// Re-rolling failed saves should reduce damage taken
+	if withReroll.DamageDealt >= withoutReroll.DamageDealt {
+		t.Errorf("re-rolling saves should reduce damage: with=%d, without=%d",
+			withReroll.DamageDealt, withoutReroll.DamageDealt)
+	}
+}

@@ -525,6 +525,15 @@ func (g *Game) executeShoot(cmd *command.ShootCommand) (command.Result, error) {
 		}
 	}
 
+	// Guarded Hero (Rule 25.0, Errata Jan 2026): A Hero with Health <= 10
+	// cannot be targeted by shooting if any friendly model (not a Manifestation)
+	// is within 4" of the Hero.
+	if target.HasKeyword(core.KeywordHero) && target.Stats.Health <= 10 {
+		if g.hasNearbyGuard(target) {
+			return command.Result{}, fmt.Errorf("target %s is a Guarded Hero (friendly models within 4\")", target.Name)
+		}
+	}
+
 	dist := core.Distance(shooter.Position(), target.Position())
 	shootCtx := &rules.Context{
 		Attacker:   shooter,
@@ -584,6 +593,10 @@ func (g *Game) executeFight(cmd *command.FightCommand) (command.Result, error) {
 	dist := core.Distance(attacker.Position(), target.Position())
 	if dist > 3.0 {
 		return command.Result{}, fmt.Errorf("target is out of melee range (%.1f\" > 3\")", dist)
+	}
+	// Rule 7.0 (Errata Jan 2026): must be in range AND visible
+	if !g.Board.IsVisible(attacker.Position(), target.Position()) {
+		return command.Result{}, fmt.Errorf("target is not visible (blocked by impassable terrain)")
 	}
 
 	results := ResolveCombat(g.Roller, g.Rules, attacker, target)
@@ -696,9 +709,34 @@ func (g *Game) CheckVictory() {
 }
 
 // CalculateObjectiveControl updates which player controls each objective.
-// Control score = sum of Control characteristics of all alive models in units contesting the objective.
+// AoS4 Rule 32.1: Each unit can only contest one objective at a time.
+// If a unit is within range of more than one objective, it contests the closest one.
+// Control score = sum of Control characteristics of all alive models in units contesting.
 // Ties broken by number of models contesting.
 func (g *Game) CalculateObjectiveControl() {
+	// Step 1: Assign each unit to its nearest contested objective (Rule 32.1)
+	unitObjective := make(map[core.UnitID]int) // unitID -> objectiveID
+	for _, u := range g.Units {
+		if u.IsDestroyed() {
+			continue
+		}
+		bestObjID := -1
+		bestDist := math.MaxFloat64
+		for _, obj := range g.Board.Objectives {
+			if obj.IsContested(u.Position()) {
+				d := core.Distance(u.Position(), obj.Position)
+				if d < bestDist {
+					bestDist = d
+					bestObjID = obj.ID
+				}
+			}
+		}
+		if bestObjID >= 0 {
+			unitObjective[u.ID] = bestObjID
+		}
+	}
+
+	// Step 2: Calculate control per objective using assigned units only
 	for _, obj := range g.Board.Objectives {
 		type playerScore struct {
 			controlScore int
@@ -710,14 +748,16 @@ func (g *Game) CalculateObjectiveControl() {
 			if u.IsDestroyed() {
 				continue
 			}
-			if obj.IsContested(u.Position()) {
-				if scores[u.OwnerID] == nil {
-					scores[u.OwnerID] = &playerScore{}
-				}
-				alive := u.AliveModels()
-				scores[u.OwnerID].controlScore += alive * u.Stats.Control
-				scores[u.OwnerID].modelCount += alive
+			assignedObj, ok := unitObjective[u.ID]
+			if !ok || assignedObj != obj.ID {
+				continue
 			}
+			if scores[u.OwnerID] == nil {
+				scores[u.OwnerID] = &playerScore{}
+			}
+			alive := u.AliveModels()
+			scores[u.OwnerID].controlScore += alive * u.Stats.Control
+			scores[u.OwnerID].modelCount += alive
 		}
 
 		bestPlayer := -1
@@ -879,12 +919,32 @@ func (g *Game) engagedUnits(playerID int, strikeOrder core.StrikeOrder) []*core.
 	return result
 }
 
+// isEngaged returns true if the unit is in combat range AND visible to an enemy.
+// AoS4 Rule 7.0 (Errata Jan 2026): both conditions must be met by the same model.
 func (g *Game) isEngaged(u *core.Unit) bool {
 	for _, other := range g.Units {
 		if other.OwnerID == u.OwnerID || other.IsDestroyed() {
 			continue
 		}
-		if core.Distance(u.Position(), other.Position()) <= 3.0 {
+		if core.Distance(u.Position(), other.Position()) <= 3.0 &&
+			g.Board.IsVisible(u.Position(), other.Position()) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasNearbyGuard returns true if a Hero has a friendly non-Manifestation model within 4".
+// AoS4 Rule 25.0 (Errata Jan 2026): Guarded Hero cannot be targeted by shooting.
+func (g *Game) hasNearbyGuard(hero *core.Unit) bool {
+	for _, u := range g.Units {
+		if u.OwnerID != hero.OwnerID || u.IsDestroyed() || u.ID == hero.ID {
+			continue
+		}
+		if u.HasKeyword(core.KeywordManifestation) {
+			continue
+		}
+		if core.Distance(hero.Position(), u.Position()) <= 4.0 {
 			return true
 		}
 	}
@@ -1868,7 +1928,8 @@ func (g *Game) executeRally(cmd *command.RallyCommand) (command.Result, error) {
 	remaining := rallyPoints
 
 	// Return slain models (costs Health characteristic per model)
-	for remaining >= unit.Stats.Health && unit.AliveModels() < len(unit.Models) {
+	// Rule 22.0 (Errata Jan 2026): coherency check for 7+ model units
+	for remaining >= unit.Stats.Health && unit.CanReturnModel() {
 		if g.restoreModel(unit) {
 			remaining -= unit.Stats.Health
 			restored++

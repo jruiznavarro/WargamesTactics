@@ -35,12 +35,13 @@ func (t TerrainType) String() string {
 
 // TerrainFeature represents a terrain piece on the battlefield.
 type TerrainFeature struct {
-	ID     int
-	Name   string
-	Type   TerrainType
-	Pos    core.Position // Top-left corner
-	Width  float64       // Width in inches (along X)
-	Height float64       // Height in inches (along Y)
+	ID             int
+	Name           string
+	Type           TerrainType
+	Pos            core.Position // Top-left corner
+	Width          float64       // Width in inches (along X)
+	Height         float64       // Height in inches (along Y)
+	IsFactionTerrain bool        // Errata Jan 2026: faction terrain cannot be targeted by Covering Fire
 }
 
 // Contains returns true if the given position is inside this terrain feature.

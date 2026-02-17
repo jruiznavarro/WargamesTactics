@@ -1,6 +1,9 @@
 package rules
 
-import "github.com/jruiznavarro/wargamestactics/internal/game/core"
+import (
+	"github.com/jruiznavarro/wargamestactics/internal/game/core"
+	"github.com/jruiznavarro/wargamestactics/pkg/dice"
+)
 
 // Context carries all the information a rule needs to evaluate its condition
 // and apply its effect. Fields are populated depending on the trigger point.
@@ -25,6 +28,12 @@ type Context struct {
 
 	// Modifier accumulator -- rules write their modifiers here.
 	Modifiers Modifiers
+
+	// Re-roll flags (Rule 2.2, Errata Jan 2026): re-rolls happen before modifiers.
+	// A die cannot be re-rolled more than once.
+	RerollHit   dice.RerollType // Re-roll type for hit rolls
+	RerollWound dice.RerollType // Re-roll type for wound rolls
+	RerollSave  dice.RerollType // Re-roll type for save rolls
 
 	// Control flags -- rules can set these to block an action.
 	Blocked      bool   // If true, the action is prevented

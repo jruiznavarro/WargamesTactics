@@ -3,6 +3,7 @@ package game
 import (
 	"testing"
 
+	"github.com/jruiznavarro/wargamestactics/internal/game/board"
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/phase"
@@ -564,5 +565,137 @@ func TestCombatPhase_AlternatingActivation(t *testing.T) {
 	if combatRecords[0].playerName != firstPlayerName {
 		t.Errorf("first combat activation should be %s (priority player), got %s",
 			firstPlayerName, combatRecords[0].playerName)
+	}
+}
+
+// --- Guarded Hero Tests (Rule 25.0, Errata Jan 2026) ---
+
+func TestGuardedHero_CannotShootIfFriendlyNearby(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+	g.CurrentPhase = phase.PhaseShooting
+
+	// P1 shooter with ranged weapon
+	shooter := g.CreateUnit("P1 Archers", 1,
+		core.Stats{Move: 5, Save: 5, Control: 1, Health: 1},
+		[]core.Weapon{{Name: "Bow", Range: 24, Attacks: 2, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1}},
+		5, core.Position{X: 10, Y: 12}, 1.0)
+
+	// P2 Hero (Health <= 10) as target
+	hero := g.CreateUnit("P2 Hero", 2,
+		core.Stats{Move: 6, Save: 3, Control: 2, Health: 5},
+		nil, 1, core.Position{X: 30, Y: 12}, 1.0)
+	hero.Keywords = []core.Keyword{core.KeywordHero}
+
+	// P2 friendly unit within 4" of the Hero
+	g.CreateUnit("P2 Guard", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 5, core.Position{X: 32, Y: 12}, 1.0)
+
+	cmd := &command.ShootCommand{OwnerID: 1, ShooterID: shooter.ID, TargetID: hero.ID}
+	_, err := g.ExecuteCommand(cmd)
+	if err == nil {
+		t.Error("expected error: cannot shoot Guarded Hero")
+	}
+}
+
+func TestGuardedHero_CanShootIfNoFriendlyNearby(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+	g.CurrentPhase = phase.PhaseShooting
+
+	// P1 shooter
+	shooter := g.CreateUnit("P1 Archers", 1,
+		core.Stats{Move: 5, Save: 5, Control: 1, Health: 1},
+		[]core.Weapon{{Name: "Bow", Range: 24, Attacks: 2, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1}},
+		5, core.Position{X: 10, Y: 12}, 1.0)
+
+	// P2 Hero alone (no friendly units nearby)
+	hero := g.CreateUnit("P2 Hero", 2,
+		core.Stats{Move: 6, Save: 3, Control: 2, Health: 5},
+		nil, 1, core.Position{X: 30, Y: 12}, 1.0)
+	hero.Keywords = []core.Keyword{core.KeywordHero}
+
+	// P2 unit far from hero (> 4")
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 5, core.Position{X: 45, Y: 12}, 1.0)
+
+	cmd := &command.ShootCommand{OwnerID: 1, ShooterID: shooter.ID, TargetID: hero.ID}
+	_, err := g.ExecuteCommand(cmd)
+	if err != nil {
+		t.Errorf("should be able to shoot unguarded Hero, got error: %v", err)
+	}
+}
+
+func TestGuardedHero_ManifestationDoesNotGuard(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+	g.CurrentPhase = phase.PhaseShooting
+
+	shooter := g.CreateUnit("P1 Archers", 1,
+		core.Stats{Move: 5, Save: 5, Control: 1, Health: 1},
+		[]core.Weapon{{Name: "Bow", Range: 24, Attacks: 2, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1}},
+		5, core.Position{X: 10, Y: 12}, 1.0)
+
+	hero := g.CreateUnit("P2 Hero", 2,
+		core.Stats{Move: 6, Save: 3, Control: 2, Health: 5},
+		nil, 1, core.Position{X: 30, Y: 12}, 1.0)
+	hero.Keywords = []core.Keyword{core.KeywordHero}
+
+	// Manifestation within 4" -- should NOT guard
+	manif := g.CreateUnit("P2 Manifestation", 2,
+		core.Stats{Move: 0, Save: 6, Control: 0, Health: 5},
+		nil, 1, core.Position{X: 32, Y: 12}, 1.0)
+	manif.Keywords = []core.Keyword{core.KeywordManifestation}
+
+	cmd := &command.ShootCommand{OwnerID: 1, ShooterID: shooter.ID, TargetID: hero.ID}
+	_, err := g.ExecuteCommand(cmd)
+	if err != nil {
+		t.Errorf("Manifestation should not guard Hero, got error: %v", err)
+	}
+}
+
+// --- Visibility in Combat Tests (Rule 7.0, Errata Jan 2026) ---
+
+func TestEngagement_RequiresVisibility(t *testing.T) {
+	g := NewGame(42, 48, 24)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+	g.CurrentPhase = phase.PhaseCombat
+
+	// Two units within 3" but with impassable terrain between them
+	g.CreateUnit("P1 Warriors", 1,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		[]core.Weapon{{Name: "Sword", Range: 0, Attacks: 2, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1}},
+		5, core.Position{X: 10, Y: 12}, 1.0)
+
+	g.CreateUnit("P2 Warriors", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		[]core.Weapon{{Name: "Sword", Range: 0, Attacks: 2, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1}},
+		5, core.Position{X: 12, Y: 12}, 1.0)
+
+	// Place impassable terrain between them
+	g.Board.AddTerrain("Wall", board.TerrainImpassable, core.Position{X: 10.5, Y: 11}, 1, 2)
+
+	// P1 unit should NOT be considered engaged because LOS is blocked
+	p1Unit := g.GetUnit(core.UnitID(1))
+	if g.isEngaged(p1Unit) {
+		t.Error("unit should not be engaged when LOS is blocked by impassable terrain")
 	}
 }

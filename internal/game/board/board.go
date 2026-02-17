@@ -70,6 +70,63 @@ func (b *Board) AddObjective(pos core.Position, radius float64) *Objective {
 	return o
 }
 
+// IsVisible checks if two positions have line of sight to each other.
+// AoS4 Rule 6.0 / 7.0 (Errata Jan 2026): visibility requires no impassable terrain
+// directly between the two positions. Simplified LOS check.
+func (b *Board) IsVisible(from, to core.Position) bool {
+	for _, t := range b.Terrain {
+		if t.Type != TerrainImpassable {
+			continue
+		}
+		if lineIntersectsRect(from, to, t.Pos, t.Width, t.Height) {
+			return false
+		}
+	}
+	return true
+}
+
+// lineIntersectsRect checks if a line segment from p1 to p2 passes through a rectangle.
+func lineIntersectsRect(p1, p2 core.Position, rectPos core.Position, rectW, rectH float64) bool {
+	// Check if either point is inside the rectangle
+	if pointInRect(p1, rectPos, rectW, rectH) || pointInRect(p2, rectPos, rectW, rectH) {
+		return true
+	}
+
+	// Check line segment against each edge of the rectangle
+	r1 := rectPos
+	r2 := core.Position{X: rectPos.X + rectW, Y: rectPos.Y}
+	r3 := core.Position{X: rectPos.X + rectW, Y: rectPos.Y + rectH}
+	r4 := core.Position{X: rectPos.X, Y: rectPos.Y + rectH}
+
+	return segmentsIntersect(p1, p2, r1, r2) ||
+		segmentsIntersect(p1, p2, r2, r3) ||
+		segmentsIntersect(p1, p2, r3, r4) ||
+		segmentsIntersect(p1, p2, r4, r1)
+}
+
+func pointInRect(p core.Position, rectPos core.Position, w, h float64) bool {
+	return p.X >= rectPos.X && p.X <= rectPos.X+w &&
+		p.Y >= rectPos.Y && p.Y <= rectPos.Y+h
+}
+
+// segmentsIntersect checks if line segment (a1,a2) intersects (b1,b2).
+func segmentsIntersect(a1, a2, b1, b2 core.Position) bool {
+	d1 := cross(b1, b2, a1)
+	d2 := cross(b1, b2, a2)
+	d3 := cross(a1, a2, b1)
+	d4 := cross(a1, a2, b2)
+
+	if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+		((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) {
+		return true
+	}
+	return false
+}
+
+func cross(a, b, c core.Position) float64 {
+	return (b.X-a.X)*(c.Y-a.Y) - (b.Y-a.Y)*(c.X-a.X)
+}
+
 // Clamp restricts a position to be within board boundaries.
 func (b *Board) Clamp(pos core.Position) core.Position {
 	result := pos

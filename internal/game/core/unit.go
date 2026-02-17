@@ -16,14 +16,15 @@ const (
 type Keyword string
 
 const (
-	KeywordInfantry  Keyword = "Infantry"
-	KeywordCavalry   Keyword = "Cavalry"
-	KeywordHero      Keyword = "Hero"
-	KeywordMonster   Keyword = "Monster"
-	KeywordWarMachine Keyword = "War Machine"
-	KeywordWizard    Keyword = "Wizard"
-	KeywordPriest    Keyword = "Priest"
-	KeywordFly       Keyword = "Fly"
+	KeywordInfantry      Keyword = "Infantry"
+	KeywordCavalry       Keyword = "Cavalry"
+	KeywordHero          Keyword = "Hero"
+	KeywordMonster       Keyword = "Monster"
+	KeywordWarMachine    Keyword = "War Machine"
+	KeywordWizard        Keyword = "Wizard"
+	KeywordPriest        Keyword = "Priest"
+	KeywordFly           Keyword = "Fly"
+	KeywordManifestation Keyword = "Manifestation"
 )
 
 // Unit represents a group of models fighting together.
@@ -135,6 +136,13 @@ func (u *Unit) HasKeyword(k Keyword) bool {
 	return false
 }
 
+// IsValidCoveringFireTarget returns true if this unit can be targeted by Covering Fire.
+// Errata Jan 2026: MANIFESTATION units and faction terrain features cannot be picked
+// as Covering Fire targets.
+func (u *Unit) IsValidCoveringFireTarget() bool {
+	return !u.HasKeyword(KeywordManifestation)
+}
+
 // ResetPhaseFlags resets all per-turn action flags.
 // Note: RitualPoints persist across turns and are NOT reset here.
 func (u *Unit) ResetPhaseFlags() {
@@ -202,4 +210,36 @@ func (u *Unit) AllocateDamage(totalDamage int) {
 			remaining = u.Models[i].TakeDamage(remaining)
 		}
 	}
+}
+
+// CanReturnModel checks if a slain model can be returned to the unit while maintaining
+// coherency. AoS4 Rule 22.0 (Errata Jan 2026): For units with 7+ models, returned models
+// must be within 1" of at least 2 other models in the unit.
+// In the simplified model (shared position), this is always true.
+func (u *Unit) CanReturnModel() bool {
+	alive := u.AliveModels()
+	slain := len(u.Models) - alive
+	if slain == 0 {
+		return false // No slain models to return
+	}
+	// For units with 7+ models, need at least 2 alive models for coherency
+	if len(u.Models) >= 7 && alive < 2 {
+		return false
+	}
+	return true
+}
+
+// MaxReturnableModels returns the maximum number of slain models that can be returned
+// while maintaining coherency (Rule 22.0).
+func (u *Unit) MaxReturnableModels() int {
+	alive := u.AliveModels()
+	slain := len(u.Models) - alive
+	if slain == 0 {
+		return 0
+	}
+	// For units with 7+ models, need at least 2 alive for coherency
+	if len(u.Models) >= 7 && alive < 2 {
+		return 0
+	}
+	return slain
 }

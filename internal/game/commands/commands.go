@@ -73,7 +73,7 @@ var Registry = map[CommandID]CommandDef{
 	CmdCoveringFire: {
 		ID: CmdCoveringFire, Name: "Covering Fire", Cost: 1,
 		Phase: phase.PhaseShooting,
-		Description: "Non-combat unit shoots closest enemy with -1 hit in enemy shooting phase.",
+		Description: "Non-combat unit shoots closest enemy with -1 hit in enemy shooting phase. Cannot target MANIFESTATIONS or faction terrain (Errata Jan 2026).",
 	},
 	CmdCounterCharge: {
 		ID: CmdCounterCharge, Name: "Counter-charge", Cost: 2,

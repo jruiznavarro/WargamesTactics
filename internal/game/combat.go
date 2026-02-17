@@ -86,6 +86,7 @@ func ResolveAttacks(roller *dice.Roller, engine *rules.Engine, attacker *core.Un
 	isCompanion := weapon.HasAbility(core.AbilityCompanion)
 
 	// Step 1: Hit rolls with modifier caps (Rule 17.1)
+	// Re-rolls happen before modifiers (Rule 2.2, Errata Jan 2026)
 	hitCtx := &rules.Context{Attacker: attacker, Defender: defender, Weapon: weapon, IsShooting: isShooting}
 	engine.Evaluate(rules.BeforeHitRoll, hitCtx)
 	hitMod := clampHitWoundMod(hitCtx.Modifiers.HitMod)
@@ -93,7 +94,7 @@ func ResolveAttacks(roller *dice.Roller, engine *rules.Engine, attacker *core.Un
 		hitMod = 0
 	}
 
-	hr := rollHits(roller, totalAttacks, weapon.ToHit, hitMod, weapon)
+	hr := rollHits(roller, totalAttacks, weapon.ToHit, hitMod, weapon, hitCtx.RerollHit)
 	result.Hits = hr.Hits + hr.AutoWounds // Total hits for display
 	result.CriticalHits = hr.Crits
 
@@ -105,7 +106,7 @@ func ResolveAttacks(roller *dice.Roller, engine *rules.Engine, attacker *core.Un
 	if isCompanion && woundMod > 0 {
 		woundMod = 0
 	}
-	wounds := rollWounds(roller, hr.Hits, weapon.ToWound, woundMod) + hr.AutoWounds
+	wounds := rollWounds(roller, hr.Hits, weapon.ToWound, woundMod, woundCtx.RerollWound) + hr.AutoWounds
 	result.Wounds = wounds
 
 	// Step 3: Save rolls with modifier caps (Rule 17.1)
@@ -119,7 +120,7 @@ func ResolveAttacks(roller *dice.Roller, engine *rules.Engine, attacker *core.Un
 	// Save threshold = Save + Rend - SaveMod
 	// Rend is stored as positive (e.g. 1), making save harder
 	saveThreshold := defender.Stats.Save + effectiveRend - saveMod
-	savesFailed := rollSaves(roller, wounds, saveThreshold)
+	savesFailed := rollSaves(roller, wounds, saveThreshold, saveCtx.RerollSave)
 	result.SavesFailed = savesFailed
 
 	// Step 4: Damage (with Charge weapon ability, Rule 20.0)
@@ -282,10 +283,27 @@ type hitResult struct {
 // rollHits rolls D6s for hits. AoS4 Rule 17.0:
 // Natural 1 always fails. Unmodified 6 = critical hit.
 // Processes Crit weapon abilities.
-func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int, weapon *core.Weapon) hitResult {
+// Re-rolls happen on the unmodified roll before modifiers (Rule 2.2, Errata Jan 2026).
+func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int, weapon *core.Weapon, reroll dice.RerollType) hitResult {
 	var r hitResult
 	for i := 0; i < numAttacks; i++ {
 		roll := roller.RollD6()
+
+		// Re-roll before modifiers (Rule 2.2)
+		if reroll != dice.RerollNone {
+			shouldReroll := false
+			switch reroll {
+			case dice.RerollFailed:
+				shouldReroll = roll+modifier < toHit && roll != 6 // Don't re-roll crits
+			case dice.RerollOnes:
+				shouldReroll = roll == 1
+			case dice.RerollAll:
+				shouldReroll = true
+			}
+			if shouldReroll {
+				roll = roller.RollD6() // Max 1 re-roll per die
+			}
+		}
 
 		if roll == 1 {
 			continue
@@ -329,10 +347,28 @@ func rollHits(roller *dice.Roller, numAttacks, toHit, modifier int, weapon *core
 }
 
 // rollWounds rolls D6s for wounds. Natural 1 always fails.
-func rollWounds(roller *dice.Roller, numHits, toWound, modifier int) int {
+// Re-rolls happen before modifiers (Rule 2.2, Errata Jan 2026).
+func rollWounds(roller *dice.Roller, numHits, toWound, modifier int, reroll dice.RerollType) int {
 	wounds := 0
 	for i := 0; i < numHits; i++ {
 		roll := roller.RollD6()
+
+		// Re-roll before modifiers (Rule 2.2)
+		if reroll != dice.RerollNone {
+			shouldReroll := false
+			switch reroll {
+			case dice.RerollFailed:
+				shouldReroll = roll+modifier < toWound && roll != 6
+			case dice.RerollOnes:
+				shouldReroll = roll == 1
+			case dice.RerollAll:
+				shouldReroll = true
+			}
+			if shouldReroll {
+				roll = roller.RollD6()
+			}
+		}
+
 		if roll == 1 {
 			continue
 		}
@@ -345,7 +381,8 @@ func rollWounds(roller *dice.Roller, numHits, toWound, modifier int) int {
 
 // rollSaves rolls D6s for saves. Natural 1 always fails.
 // saveThreshold > 6 means saves are impossible.
-func rollSaves(roller *dice.Roller, numWounds, saveThreshold int) int {
+// Re-rolls happen before modifiers (Rule 2.2, Errata Jan 2026).
+func rollSaves(roller *dice.Roller, numWounds, saveThreshold int, reroll dice.RerollType) int {
 	failed := 0
 	for i := 0; i < numWounds; i++ {
 		if saveThreshold > 6 {
@@ -353,6 +390,23 @@ func rollSaves(roller *dice.Roller, numWounds, saveThreshold int) int {
 			continue
 		}
 		roll := roller.RollD6()
+
+		// Re-roll before modifiers (Rule 2.2)
+		if reroll != dice.RerollNone {
+			shouldReroll := false
+			switch reroll {
+			case dice.RerollFailed:
+				shouldReroll = roll == 1 || roll < saveThreshold
+			case dice.RerollOnes:
+				shouldReroll = roll == 1
+			case dice.RerollAll:
+				shouldReroll = true
+			}
+			if shouldReroll {
+				roll = roller.RollD6()
+			}
+		}
+
 		if roll == 1 || roll < saveThreshold {
 			failed++
 		}

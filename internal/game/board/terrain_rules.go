@@ -64,9 +64,10 @@ func coverRule(t *TerrainFeature) []rules.Rule {
 	}
 }
 
-// obscuringRule: AoS4 Rule 1.2 Obscuring.
-// A unit cannot be targeted by shooting attacks from enemies not within
-// its combat range if it is behind or wholly on this terrain, unless it has Fly.
+// obscuringRule: AoS4 Rule 1.2 Obscuring (Errata Jan 2026).
+// A unit cannot be targeted by shooting attacks if it is behind or wholly on
+// this terrain feature, unless the attacking unit has FLY or is within the
+// target's combat range.
 func obscuringRule(t *TerrainFeature) []rules.Rule {
 	return []rules.Rule{
 		{
@@ -80,9 +81,11 @@ func obscuringRule(t *TerrainFeature) []rules.Rule {
 				if !t.Contains(ctx.Defender.Position()) {
 					return false
 				}
-				if ctx.Defender.HasKeyword(core.KeywordFly) {
+				// Errata: attacker with FLY can ignore Obscuring
+				if ctx.Attacker.HasKeyword(core.KeywordFly) {
 					return false
 				}
+				// Attacker within combat range of target can still shoot
 				dist := core.Distance(ctx.Attacker.Position(), ctx.Defender.Position())
 				if dist <= 3.0 {
 					return false

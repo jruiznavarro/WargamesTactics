@@ -636,3 +636,58 @@ func TestObjectiveControl_DestroyedUnitsIgnored(t *testing.T) {
 		t.Errorf("destroyed unit should not control objective, got controller %d", g.ObjectiveControl[1])
 	}
 }
+
+// --- Rule 32.1 Tests: Unit contests only 1 objective ---
+
+func TestObjectiveControl_UnitContestsOnlyNearest(t *testing.T) {
+	g := setupScoringGame(1)
+
+	// Two overlapping objectives at nearby positions
+	g.Board.AddObjective(core.Position{X: 20, Y: 12}, 6.0)
+	g.Board.AddObjective(core.Position{X: 24, Y: 12}, 6.0)
+
+	// P1 unit at (22, 12) -- within range of BOTH objectives
+	g.CreateUnit("P1 Warriors", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 22, Y: 12}, 1.0)
+
+	// P2 unit only on objective 2 at (24, 12)
+	g.CreateUnit("P2 Warriors", 2,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 24, Y: 12}, 1.0)
+
+	g.CalculateObjectiveControl()
+
+	// P1's unit is closer to obj 1 (distance 2"), should contest obj 1 only
+	// P2's unit is on obj 2, should control it
+	if g.ObjectiveControl[1] != 1 {
+		t.Errorf("expected P1 to control objective 1 (nearest), got controller %d", g.ObjectiveControl[1])
+	}
+	if g.ObjectiveControl[2] != 2 {
+		t.Errorf("expected P2 to control objective 2 (P1 unit contests nearest only), got controller %d", g.ObjectiveControl[2])
+	}
+}
+
+func TestObjectiveControl_UnitContestsOnlyOne_EvenIfOverlapping(t *testing.T) {
+	g := setupScoringGame(1)
+
+	// Two objectives very close together
+	g.Board.AddObjective(core.Position{X: 12, Y: 12}, 8.0)
+	g.Board.AddObjective(core.Position{X: 14, Y: 12}, 8.0)
+
+	// Single unit right between them - should contest only the nearest
+	g.CreateUnit("P1 Warriors", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 12, Y: 12}, 1.0)
+
+	g.CalculateObjectiveControl()
+
+	// Unit is at (12,12), obj 1 is at (12,12) dist=0, obj 2 is at (14,12) dist=2
+	// Should only contest obj 1
+	if g.ObjectiveControl[1] != 1 {
+		t.Errorf("expected P1 to control objective 1, got controller %d", g.ObjectiveControl[1])
+	}
+	if g.ObjectiveControl[2] != -1 {
+		t.Errorf("expected objective 2 to be uncontrolled (unit contests only nearest), got controller %d", g.ObjectiveControl[2])
+	}
+}

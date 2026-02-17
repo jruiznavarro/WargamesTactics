@@ -352,6 +352,72 @@ func TestMultipleTerrain_CoverStacks(t *testing.T) {
 	}
 }
 
+// --- Obscuring Errata (Jan 2026): FLY on attacker, not defender ---
+
+func TestObscuring_AttackerWithFly_CanShoot(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 10, Y: 10}, 6, 6)
+	e := setupEngine(b)
+
+	// Attacker with FLY far from defender
+	attacker := &core.Unit{
+		ID:       1,
+		Keywords: []core.Keyword{core.KeywordFly},
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 0, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+	// Defender on obscuring terrain
+	defender := &core.Unit{
+		ID: 2,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 13, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	ctx := &rules.Context{
+		Attacker: attacker,
+		Defender: defender,
+	}
+	e.Evaluate(rules.BeforeShoot, ctx)
+
+	if ctx.Blocked {
+		t.Error("attacker with FLY should be able to shoot through Obscuring terrain (Errata Jan 2026)")
+	}
+}
+
+func TestObscuring_DefenderWithFly_StillBlocked(t *testing.T) {
+	b := board.NewBoard(48, 24)
+	b.AddTerrain("Forest", board.TerrainObscuring, core.Position{X: 10, Y: 10}, 6, 6)
+	e := setupEngine(b)
+
+	// Non-FLY attacker far from defender
+	attacker := &core.Unit{
+		ID: 1,
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 0, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+	// Defender with FLY on obscuring terrain
+	defender := &core.Unit{
+		ID:       2,
+		Keywords: []core.Keyword{core.KeywordFly},
+		Models: []core.Model{
+			{ID: 0, Position: core.Position{X: 13, Y: 13}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
+		},
+	}
+
+	ctx := &rules.Context{
+		Attacker: attacker,
+		Defender: defender,
+	}
+	e.Evaluate(rules.BeforeShoot, ctx)
+
+	if !ctx.Blocked {
+		t.Error("defender with FLY should NOT bypass Obscuring anymore (Errata Jan 2026: FLY check on attacker)")
+	}
+}
+
 // --- Rule Count ---
 
 func TestTerrainRules_Count(t *testing.T) {
