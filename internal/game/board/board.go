@@ -4,9 +4,10 @@ import "github.com/jruiznavarro/wargamestactics/internal/game/core"
 
 // Board represents the battlefield.
 type Board struct {
-	Width   float64           // Width in inches
-	Height  float64           // Height in inches
-	Terrain []*TerrainFeature // Terrain features on the board
+	Width      float64           // Width in inches
+	Height     float64           // Height in inches
+	Terrain    []*TerrainFeature // Terrain features on the board
+	Objectives []*Objective      // Scoring objectives on the board
 }
 
 // NewBoard creates a new board with the given dimensions.
@@ -56,6 +57,17 @@ func (b *Board) HasTerrainType(pos core.Position, terrainType TerrainType) bool 
 func (b *Board) IsInBounds(pos core.Position) bool {
 	return pos.X >= 0 && pos.X <= b.Width &&
 		pos.Y >= 0 && pos.Y <= b.Height
+}
+
+// AddObjective adds a scoring objective to the board and returns it.
+func (b *Board) AddObjective(pos core.Position, radius float64) *Objective {
+	o := &Objective{
+		ID:       len(b.Objectives) + 1,
+		Position: pos,
+		Radius:   radius,
+	}
+	b.Objectives = append(b.Objectives, o)
+	return o
 }
 
 // Clamp restricts a position to be within board boundaries.

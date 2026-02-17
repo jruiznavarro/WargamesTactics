@@ -23,16 +23,27 @@ type TerrainView struct {
 	Height float64
 }
 
+// ObjectiveView is a read-only view of an objective.
+type ObjectiveView struct {
+	ID           int
+	Position     [2]float64
+	Radius       float64
+	ControlledBy int // Player ID, -1 if uncontrolled
+}
+
 // GameView provides a read-only snapshot of the game state.
 type GameView struct {
-	Units         map[int][]UnitView
-	Terrain       []TerrainView
-	BoardWidth    float64
-	BoardHeight   float64
-	CurrentPhase  phase.PhaseType
-	BattleRound   int
-	ActivePlayer  int
-	CommandPoints map[int]int // CP remaining per player ID
+	Units           map[int][]UnitView
+	Terrain         []TerrainView
+	Objectives      []ObjectiveView
+	BoardWidth      float64
+	BoardHeight     float64
+	CurrentPhase    phase.PhaseType
+	BattleRound     int
+	MaxBattleRounds int
+	ActivePlayer    int
+	CommandPoints   map[int]int // CP remaining per player ID
+	VictoryPoints   map[int]int // VP per player ID
 }
 
 // UnitView is a read-only view of a unit.

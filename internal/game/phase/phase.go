@@ -28,6 +28,8 @@ func NewHeroPhase() Phase {
 		AllowedCommands: []command.CommandType{
 			command.CommandTypeCast,
 			command.CommandTypeChant,
+			command.CommandTypeRally,
+			command.CommandTypeMagicalIntervention,
 			command.CommandTypeEndPhase,
 		},
 	}

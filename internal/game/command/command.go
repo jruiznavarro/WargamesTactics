@@ -13,9 +13,11 @@ const (
 	CommandTypeFight    CommandType = "fight"
 	CommandTypeCharge   CommandType = "charge"
 	CommandTypePileIn   CommandType = "pile_in"
-	CommandTypeCast     CommandType = "cast"
-	CommandTypeChant    CommandType = "chant"
-	CommandTypeEndPhase CommandType = "end_phase"
+	CommandTypeCast                CommandType = "cast"
+	CommandTypeChant               CommandType = "chant"
+	CommandTypeRally               CommandType = "rally"
+	CommandTypeMagicalIntervention CommandType = "magical_intervention"
+	CommandTypeEndPhase            CommandType = "end_phase"
 )
 
 // Result holds the outcome of an executed command.

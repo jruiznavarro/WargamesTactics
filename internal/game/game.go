@@ -30,6 +30,12 @@ type Game struct {
 	Log            []string
 	IsOver         bool
 	Winner         int // Player ID of winner, -1 if draw
+	MaxBattleRounds int // Total battle rounds (default 5)
+
+	// Scoring: VP tracked per player
+	VictoryPoints map[int]int // playerID -> VP
+	// Objective control: which player controls each objective (objectiveID -> playerID, -1 = uncontrolled)
+	ObjectiveControl map[int]int
 
 	// Per-turn magic tracking: spell names cast this turn per player (same spell once per turn unless Unlimited)
 	SpellsCastThisTurn map[int]map[string]bool // playerID -> spell name -> cast
@@ -45,6 +51,9 @@ func NewGame(seed int64, boardWidth, boardHeight float64) *Game {
 		Commands:           commands.NewCommandTracker(),
 		NextUnitID:         1,
 		Winner:             -1,
+		MaxBattleRounds:    5,
+		VictoryPoints:      make(map[int]int),
+		ObjectiveControl:   make(map[int]int),
 		SpellsCastThisTurn: make(map[int]map[string]bool),
 	}
 }
@@ -199,22 +208,41 @@ func (g *Game) View(playerID int) *GameView {
 		})
 	}
 
+	var objectiveViews []ObjectiveView
+	for _, o := range g.Board.Objectives {
+		controlledBy := -1
+		if pid, ok := g.ObjectiveControl[o.ID]; ok {
+			controlledBy = pid
+		}
+		objectiveViews = append(objectiveViews, ObjectiveView{
+			ID:           o.ID,
+			Position:     [2]float64{o.Position.X, o.Position.Y},
+			Radius:       o.Radius,
+			ControlledBy: controlledBy,
+		})
+	}
+
 	cpMap := make(map[int]int)
+	vpMap := make(map[int]int)
 	for _, p := range g.Players {
 		if state := g.Commands.GetState(p.ID()); state != nil {
 			cpMap[p.ID()] = state.CommandPoints
 		}
+		vpMap[p.ID()] = g.VictoryPoints[p.ID()]
 	}
 
 	return &GameView{
-		Units:         unitsByOwner,
-		Terrain:       terrainViews,
-		BoardWidth:    g.Board.Width,
-		BoardHeight:   g.Board.Height,
-		CurrentPhase:  g.CurrentPhase,
-		BattleRound:   g.BattleRound,
-		ActivePlayer:  g.ActivePlayer,
-		CommandPoints: cpMap,
+		Units:           unitsByOwner,
+		Terrain:         terrainViews,
+		Objectives:      objectiveViews,
+		BoardWidth:      g.Board.Width,
+		BoardHeight:     g.Board.Height,
+		CurrentPhase:    g.CurrentPhase,
+		BattleRound:     g.BattleRound,
+		MaxBattleRounds: g.MaxBattleRounds,
+		ActivePlayer:    g.ActivePlayer,
+		CommandPoints:   cpMap,
+		VictoryPoints:   vpMap,
 	}
 }
 
@@ -268,6 +296,10 @@ func (g *Game) ExecuteCommand(cmd interface{}) (command.Result, error) {
 		return g.executeCast(c)
 	case *command.ChantCommand:
 		return g.executeChant(c)
+	case *command.RallyCommand:
+		return g.executeRally(c)
+	case *command.MagicalInterventionCommand:
+		return g.executeMagicalIntervention(c)
 	case *command.EndPhaseCommand:
 		return command.Result{Description: "Phase ended", Success: true}, nil
 	default:
@@ -643,7 +675,7 @@ func (g *Game) ResetTurnFlags() {
 	g.SpellsCastThisTurn = make(map[int]map[string]bool)
 }
 
-// CheckVictory checks if a player has won.
+// CheckVictory checks if a player has lost all units (immediate loss).
 func (g *Game) CheckVictory() {
 	if len(g.Players) < 2 {
 		return
@@ -660,6 +692,126 @@ func (g *Game) CheckVictory() {
 				}
 			}
 		}
+	}
+}
+
+// CalculateObjectiveControl updates which player controls each objective.
+// Control score = sum of Control characteristics of all alive models in units contesting the objective.
+// Ties broken by number of models contesting.
+func (g *Game) CalculateObjectiveControl() {
+	for _, obj := range g.Board.Objectives {
+		type playerScore struct {
+			controlScore int
+			modelCount   int
+		}
+		scores := make(map[int]*playerScore) // playerID -> score
+
+		for _, u := range g.Units {
+			if u.IsDestroyed() {
+				continue
+			}
+			if obj.IsContested(u.Position()) {
+				if scores[u.OwnerID] == nil {
+					scores[u.OwnerID] = &playerScore{}
+				}
+				alive := u.AliveModels()
+				scores[u.OwnerID].controlScore += alive * u.Stats.Control
+				scores[u.OwnerID].modelCount += alive
+			}
+		}
+
+		bestPlayer := -1
+		bestControl := 0
+		bestModels := 0
+		for pid, s := range scores {
+			if s.controlScore > bestControl ||
+				(s.controlScore == bestControl && s.modelCount > bestModels) {
+				bestPlayer = pid
+				bestControl = s.controlScore
+				bestModels = s.modelCount
+			}
+		}
+		g.ObjectiveControl[obj.ID] = bestPlayer
+	}
+}
+
+// ObjectivesControlledBy returns the number of objectives controlled by a player.
+func (g *Game) ObjectivesControlledBy(playerID int) int {
+	count := 0
+	for _, controllerID := range g.ObjectiveControl {
+		if controllerID == playerID {
+			count++
+		}
+	}
+	return count
+}
+
+// ScoreEndOfTurn awards victory points for the active player at end of their turn.
+// AoS4 scoring: 1 VP for controlling >= 1 objective, 1 VP for >= 2, 1 VP for controlling more than opponent.
+func (g *Game) ScoreEndOfTurn(playerID int) int {
+	g.CalculateObjectiveControl()
+
+	scored := 0
+	myObjectives := g.ObjectivesControlledBy(playerID)
+
+	// 1 VP for controlling at least 1 objective
+	if myObjectives >= 1 {
+		scored++
+		g.Logf("  +1 VP: %s controls at least 1 objective", g.playerName(playerID))
+	}
+
+	// 1 VP for controlling 2 or more objectives
+	if myObjectives >= 2 {
+		scored++
+		g.Logf("  +1 VP: %s controls 2+ objectives", g.playerName(playerID))
+	}
+
+	// 1 VP for controlling more objectives than opponent
+	for _, p := range g.Players {
+		if p.ID() != playerID {
+			opponentObjectives := g.ObjectivesControlledBy(p.ID())
+			if myObjectives > opponentObjectives {
+				scored++
+				g.Logf("  +1 VP: %s controls more objectives than %s (%d vs %d)",
+					g.playerName(playerID), g.playerName(p.ID()), myObjectives, opponentObjectives)
+			}
+			break // 2-player game
+		}
+	}
+
+	g.VictoryPoints[playerID] += scored
+	g.Logf("  %s scored %d VP this turn (total: %d)", g.playerName(playerID), scored, g.VictoryPoints[playerID])
+	return scored
+}
+
+// CheckFinalVictory determines the winner after all battle rounds are complete.
+func (g *Game) CheckFinalVictory() {
+	if g.BattleRound < g.MaxBattleRounds {
+		return
+	}
+
+	g.IsOver = true
+	bestScore := -1
+	bestPlayer := -1
+	tied := false
+
+	for _, p := range g.Players {
+		vp := g.VictoryPoints[p.ID()]
+		if vp > bestScore {
+			bestScore = vp
+			bestPlayer = p.ID()
+			tied = false
+		} else if vp == bestScore {
+			tied = true
+		}
+	}
+
+	if tied {
+		g.Winner = -1 // Draw
+		g.Logf("Game ends in a draw! Both players have %d VP.", bestScore)
+	} else {
+		g.Winner = bestPlayer
+		g.Logf("%s wins with %d VP!", g.playerName(bestPlayer), bestScore)
 	}
 }
 
@@ -1656,4 +1808,265 @@ func (g *Game) healUnit(target *core.Unit, amount int) int {
 		}
 	}
 	return healed
+}
+
+// restoreModel returns a slain model to life with full wounds.
+// Returns true if a model was restored, false if none could be.
+func (g *Game) restoreModel(unit *core.Unit) bool {
+	for i := range unit.Models {
+		if !unit.Models[i].IsAlive {
+			unit.Models[i].IsAlive = true
+			unit.Models[i].CurrentWounds = unit.Models[i].MaxWounds
+			return true
+		}
+	}
+	return false
+}
+
+// executeRally: AoS4 Rule 20.0. Costs 1 CP.
+// Pick a friendly unit not in combat. Roll 6D6: each 4+ = 1 rally point.
+// Rally points heal 1 wound each, or can be accumulated to return a slain model
+// (costs the model's Health characteristic worth of rally points).
+func (g *Game) executeRally(cmd *command.RallyCommand) (command.Result, error) {
+	unit := g.GetUnit(cmd.UnitID)
+	if unit == nil {
+		return command.Result{}, fmt.Errorf("unit %d not found", cmd.UnitID)
+	}
+	if unit.OwnerID != cmd.OwnerID {
+		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.UnitID, cmd.OwnerID)
+	}
+	if unit.IsDestroyed() {
+		return command.Result{}, fmt.Errorf("unit %s is destroyed", unit.Name)
+	}
+	if g.isEngaged(unit) {
+		return command.Result{}, fmt.Errorf("unit %s is in combat, cannot rally", unit.Name)
+	}
+
+	// Spend 1 CP
+	state := g.Commands.GetState(cmd.OwnerID)
+	if state == nil {
+		return command.Result{}, fmt.Errorf("no command state for player %d", cmd.OwnerID)
+	}
+	if err := state.Spend(commands.CmdRally, cmd.UnitID); err != nil {
+		return command.Result{}, fmt.Errorf("cannot use Rally: %w", err)
+	}
+
+	// Roll 6D6, count 4+
+	rallyPoints := 0
+	for i := 0; i < 6; i++ {
+		roll := g.Roller.RollD6()
+		if roll >= 4 {
+			rallyPoints++
+		}
+	}
+
+	g.Logf("    %s rallies: %d rally points", unit.Name, rallyPoints)
+
+	// Spend rally points: try to return slain models first, then heal
+	restored := 0
+	healed := 0
+	remaining := rallyPoints
+
+	// Return slain models (costs Health characteristic per model)
+	for remaining >= unit.Stats.Health && unit.AliveModels() < len(unit.Models) {
+		if g.restoreModel(unit) {
+			remaining -= unit.Stats.Health
+			restored++
+		} else {
+			break
+		}
+	}
+
+	// Heal remaining points
+	if remaining > 0 {
+		healed = g.healUnit(unit, remaining)
+	}
+
+	desc := fmt.Sprintf("%s rallied: %d points, %d models restored, %d wounds healed",
+		unit.Name, rallyPoints, restored, healed)
+	g.Logf("    %s", desc)
+	return command.Result{Description: desc, Success: true}, nil
+}
+
+// executeMagicalIntervention: AoS4 Command. Costs 1 CP.
+// A friendly Wizard or Priest uses a spell/prayer in the enemy's hero phase
+// with -1 to the casting/chanting roll.
+func (g *Game) executeMagicalIntervention(cmd *command.MagicalInterventionCommand) (command.Result, error) {
+	caster := g.GetUnit(cmd.CasterID)
+	if caster == nil {
+		return command.Result{}, fmt.Errorf("caster unit %d not found", cmd.CasterID)
+	}
+	if caster.OwnerID != cmd.OwnerID {
+		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.CasterID, cmd.OwnerID)
+	}
+
+	// Spend 1 CP
+	state := g.Commands.GetState(cmd.OwnerID)
+	if state == nil {
+		return command.Result{}, fmt.Errorf("no command state for player %d", cmd.OwnerID)
+	}
+	if err := state.Spend(commands.CmdMagicalIntervention, cmd.CasterID); err != nil {
+		return command.Result{}, fmt.Errorf("cannot use Magical Intervention: %w", err)
+	}
+
+	// Determine if using a spell or prayer
+	if cmd.SpellIndex >= 0 {
+		return g.executeMagicalInterventionSpell(cmd, caster)
+	}
+	if cmd.PrayerIndex >= 0 {
+		return g.executeMagicalInterventionPrayer(cmd, caster)
+	}
+	return command.Result{}, fmt.Errorf("must specify either a spell or prayer index")
+}
+
+// executeMagicalInterventionSpell handles casting a spell via Magical Intervention (-1 penalty).
+func (g *Game) executeMagicalInterventionSpell(cmd *command.MagicalInterventionCommand, caster *core.Unit) (command.Result, error) {
+	if !caster.CanCast() {
+		return command.Result{}, fmt.Errorf("unit %s cannot cast", caster.Name)
+	}
+	if cmd.SpellIndex < 0 || cmd.SpellIndex >= len(caster.Spells) {
+		return command.Result{}, fmt.Errorf("invalid spell index %d", cmd.SpellIndex)
+	}
+
+	spell := caster.Spells[cmd.SpellIndex]
+
+	// Same spell once per turn restriction
+	if !spell.Unlimited {
+		if playerSpells, ok := g.SpellsCastThisTurn[caster.OwnerID]; ok {
+			if playerSpells[spell.Name] {
+				return command.Result{}, fmt.Errorf("%s has already been cast this turn", spell.Name)
+			}
+		}
+	}
+
+	target := g.GetUnit(cmd.TargetID)
+	if target == nil {
+		return command.Result{}, fmt.Errorf("target unit %d not found", cmd.TargetID)
+	}
+	if spell.TargetFriendly && target.OwnerID != caster.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets friendly units, but target belongs to enemy", spell.Name)
+	}
+	if !spell.TargetFriendly && target.OwnerID == caster.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets enemy units, but target is friendly", spell.Name)
+	}
+
+	dist := core.Distance(caster.Position(), target.Position())
+	if dist > float64(spell.Range) {
+		return command.Result{}, fmt.Errorf("target out of range (%.1f\" > %d\")", dist, spell.Range)
+	}
+
+	caster.CastCount++
+
+	// Roll 2D6 with -1 penalty for magical intervention
+	die1 := g.Roller.RollD6()
+	die2 := g.Roller.RollD6()
+	castingRoll := die1 + die2 - 1 // -1 for magical intervention
+
+	g.Logf("    %s (Magical Intervention) casts %s: rolled %d+%d-1 = %d (needs %d)",
+		caster.Name, spell.Name, die1, die2, castingRoll, spell.CastingValue)
+
+	// Miscast on natural double 1s (before modifier)
+	if die1 == 1 && die2 == 1 {
+		caster.HasMiscast = true
+		mortalDmg := g.Roller.RollD3()
+		g.Logf("    MISCAST! %s suffers %d mortal damage", caster.Name, mortalDmg)
+		ResolveMortalWounds(g.Roller, caster, mortalDmg)
+		g.CheckVictory()
+		desc := fmt.Sprintf("%s miscast %s via Magical Intervention! %d mortal damage", caster.Name, spell.Name, mortalDmg)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	if castingRoll < spell.CastingValue {
+		desc := fmt.Sprintf("%s failed to cast %s via Magical Intervention (rolled %d, needed %d)",
+			caster.Name, spell.Name, castingRoll, spell.CastingValue)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	// Unbind attempt
+	if unbound := g.attemptUnbind(caster, castingRoll); unbound {
+		desc := fmt.Sprintf("%s was unbound!", spell.Name)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	// Track same-spell restriction
+	if g.SpellsCastThisTurn[caster.OwnerID] == nil {
+		g.SpellsCastThisTurn[caster.OwnerID] = make(map[string]bool)
+	}
+	g.SpellsCastThisTurn[caster.OwnerID][spell.Name] = true
+
+	return g.applySpellEffect(caster, target, &spell)
+}
+
+// executeMagicalInterventionPrayer handles chanting a prayer via Magical Intervention (-1 penalty).
+func (g *Game) executeMagicalInterventionPrayer(cmd *command.MagicalInterventionCommand, chanter *core.Unit) (command.Result, error) {
+	if !chanter.CanChant() {
+		return command.Result{}, fmt.Errorf("unit %s cannot chant", chanter.Name)
+	}
+	if cmd.PrayerIndex < 0 || cmd.PrayerIndex >= len(chanter.Prayers) {
+		return command.Result{}, fmt.Errorf("invalid prayer index %d", cmd.PrayerIndex)
+	}
+
+	prayer := chanter.Prayers[cmd.PrayerIndex]
+	chanter.ChantCount++
+
+	// Roll D6 with -1 penalty
+	rawRoll := g.Roller.RollD6()
+	chantRoll := rawRoll - 1 // -1 for magical intervention
+
+	g.Logf("    %s (Magical Intervention) chants %s: rolled %d-1 = %d (ritual points: %d)",
+		chanter.Name, prayer.Name, rawRoll, chantRoll, chanter.RitualPoints)
+
+	// Natural 1 still fails (check raw roll)
+	if rawRoll == 1 {
+		lost := g.Roller.RollD3()
+		chanter.RitualPoints -= lost
+		if chanter.RitualPoints < 0 {
+			chanter.RitualPoints = 0
+		}
+		desc := fmt.Sprintf("%s failed chanting via MI (rolled 1), lost %d ritual points (now %d)",
+			chanter.Name, lost, chanter.RitualPoints)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	if cmd.BankPoints {
+		// Bank: gain ritual points equal to modified roll (min 1)
+		banked := chantRoll
+		if banked < 1 {
+			banked = 1
+		}
+		chanter.RitualPoints += banked
+		desc := fmt.Sprintf("%s banks %d ritual points via MI (now %d)",
+			chanter.Name, banked, chanter.RitualPoints)
+		return command.Result{Description: desc, Success: true}, nil
+	}
+
+	// Spend: ritual points + modified roll vs ChantingValue
+	total := chantRoll + chanter.RitualPoints
+	if total < prayer.ChantingValue {
+		desc := fmt.Sprintf("%s failed %s via MI (total %d, needed %d)",
+			chanter.Name, prayer.Name, total, prayer.ChantingValue)
+		chanter.RitualPoints = 0
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	chanter.RitualPoints = 0
+
+	target := g.GetUnit(cmd.TargetID)
+	if target == nil {
+		return command.Result{}, fmt.Errorf("target unit %d not found", cmd.TargetID)
+	}
+	if prayer.TargetFriendly && target.OwnerID != chanter.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets friendly units, but target belongs to enemy", prayer.Name)
+	}
+	if !prayer.TargetFriendly && target.OwnerID == chanter.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets enemy units, but target is friendly", prayer.Name)
+	}
+
+	dist := core.Distance(chanter.Position(), target.Position())
+	if dist > float64(prayer.Range) {
+		return command.Result{}, fmt.Errorf("target out of prayer range (%.1f\" > %d\")", dist, prayer.Range)
+	}
+
+	g.Logf("    Prayer %s answered via Magical Intervention!", prayer.Name)
+	return g.applyPrayerEffect(chanter, target, &prayer)
 }
