@@ -136,6 +136,23 @@ func (g *Game) View(playerID int) *GameView {
 			})
 		}
 
+		var spellViews []SpellView
+		for _, s := range u.Spells {
+			spellViews = append(spellViews, SpellView{
+				Name:         s.Name,
+				CastingValue: s.CastingValue,
+				Range:        s.Range,
+			})
+		}
+		var prayerViews []PrayerView
+		for _, p := range u.Prayers {
+			prayerViews = append(prayerViews, PrayerView{
+				Name:          p.Name,
+				ChantingValue: p.ChantingValue,
+				Range:         p.Range,
+			})
+		}
+
 		view := UnitView{
 			ID:            int(u.ID),
 			Name:          u.Name,
@@ -158,6 +175,10 @@ func (g *Game) View(playerID int) *GameView {
 			HasCharged:    u.HasCharged,
 			HasPiledIn:    u.HasPiledIn,
 			IsEngaged:     g.isEngaged(u),
+			Spells:        spellViews,
+			Prayers:       prayerViews,
+			CanCast:       u.CanCast(),
+			CanChant:      u.CanChant(),
 		}
 		unitsByOwner[u.OwnerID] = append(unitsByOwner[u.OwnerID], view)
 	}
@@ -239,6 +260,10 @@ func (g *Game) ExecuteCommand(cmd interface{}) (command.Result, error) {
 		return g.executeCharge(c)
 	case *command.PileInCommand:
 		return g.executePileIn(c)
+	case *command.CastCommand:
+		return g.executeCast(c)
+	case *command.ChantCommand:
+		return g.executeChant(c)
 	case *command.EndPhaseCommand:
 		return command.Result{Description: "Phase ended", Success: true}, nil
 	default:
@@ -1308,4 +1333,305 @@ func (g *Game) playerName(playerID int) string {
 		}
 	}
 	return fmt.Sprintf("Player %d", playerID)
+}
+
+// executeCast: AoS4 Rule 19.0. Wizard rolls 2D6 >= casting value.
+// Natural doubles = empowered (cannot be unbound).
+// Enemy wizard within 30" can attempt to unbind by rolling 2D6 > casting roll.
+func (g *Game) executeCast(cmd *command.CastCommand) (command.Result, error) {
+	caster := g.GetUnit(cmd.CasterID)
+	if caster == nil {
+		return command.Result{}, fmt.Errorf("caster unit %d not found", cmd.CasterID)
+	}
+	if caster.OwnerID != cmd.OwnerID {
+		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.CasterID, cmd.OwnerID)
+	}
+	if !caster.CanCast() {
+		return command.Result{}, fmt.Errorf("unit %s cannot cast (not a wizard or no casts remaining)", caster.Name)
+	}
+	if cmd.SpellIndex < 0 || cmd.SpellIndex >= len(caster.Spells) {
+		return command.Result{}, fmt.Errorf("invalid spell index %d", cmd.SpellIndex)
+	}
+
+	target := g.GetUnit(cmd.TargetID)
+	if target == nil {
+		return command.Result{}, fmt.Errorf("target unit %d not found", cmd.TargetID)
+	}
+
+	spell := caster.Spells[cmd.SpellIndex]
+
+	// Validate target ownership vs spell type
+	if spell.TargetFriendly && target.OwnerID != caster.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets friendly units, but target belongs to enemy", spell.Name)
+	}
+	if !spell.TargetFriendly && target.OwnerID == caster.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets enemy units, but target is friendly", spell.Name)
+	}
+
+	// Range check
+	dist := core.Distance(caster.Position(), target.Position())
+	if dist > float64(spell.Range) {
+		return command.Result{}, fmt.Errorf("target is out of spell range (%.1f\" > %d\")", dist, spell.Range)
+	}
+
+	caster.CastCount++
+
+	// Roll 2D6
+	die1 := g.Roller.RollD6()
+	die2 := g.Roller.RollD6()
+	castingRoll := die1 + die2
+	empowered := die1 == die2 // Natural doubles = empowered
+
+	empStr := ""
+	if empowered {
+		empStr = " (EMPOWERED)"
+	}
+	g.Logf("    %s casts %s: rolled %d+%d = %d (needs %d)%s",
+		caster.Name, spell.Name, die1, die2, castingRoll, spell.CastingValue, empStr)
+
+	if castingRoll < spell.CastingValue {
+		desc := fmt.Sprintf("%s failed to cast %s (rolled %d, needed %d)", caster.Name, spell.Name, castingRoll, spell.CastingValue)
+		g.Logf("    %s", desc)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	// Unbind attempt: closest enemy wizard within 30" that hasn't unbound yet
+	if !empowered {
+		if unbound := g.attemptUnbind(caster, castingRoll); unbound {
+			desc := fmt.Sprintf("%s was unbound!", spell.Name)
+			return command.Result{Description: desc, Success: false}, nil
+		}
+	}
+
+	// Spell succeeds - apply effect
+	return g.applySpellEffect(caster, target, &spell)
+}
+
+// attemptUnbind finds the closest enemy wizard within 30" and tries to unbind.
+// Returns true if the spell was successfully unbound.
+func (g *Game) attemptUnbind(caster *core.Unit, castingRoll int) bool {
+	var bestWizard *core.Unit
+	bestDist := math.MaxFloat64
+
+	for _, u := range g.Units {
+		if u.OwnerID == caster.OwnerID || u.IsDestroyed() {
+			continue
+		}
+		if !u.CanUnbind() {
+			continue
+		}
+		d := core.Distance(caster.Position(), u.Position())
+		if d <= 30.0 && d < bestDist {
+			bestDist = d
+			bestWizard = u
+		}
+	}
+
+	if bestWizard == nil {
+		return false
+	}
+
+	bestWizard.UnbindCount++
+	unbindRoll := g.Roller.Roll2D6()
+	g.Logf("    %s attempts to unbind: rolled %d (needs > %d)",
+		bestWizard.Name, unbindRoll, castingRoll)
+
+	if unbindRoll > castingRoll {
+		g.Logf("    Spell unbound by %s!", bestWizard.Name)
+		return true
+	}
+	g.Logf("    Unbind failed")
+	return false
+}
+
+// applySpellEffect resolves the effect of a successfully cast spell.
+func (g *Game) applySpellEffect(caster *core.Unit, target *core.Unit, spell *core.Spell) (command.Result, error) {
+	switch spell.Effect {
+	case core.SpellEffectDamage:
+		// D3 mortal wounds
+		mortalDmg := g.Roller.RollD3()
+		g.Logf("    %s deals %d mortal wounds to %s", spell.Name, mortalDmg, target.Name)
+		ResolveMortalWounds(g.Roller, target, mortalDmg)
+		g.CheckVictory()
+		desc := fmt.Sprintf("%s cast %s on %s: %d mortal wounds", caster.Name, spell.Name, target.Name, mortalDmg)
+		return command.Result{Description: desc, Success: true}, nil
+
+	case core.SpellEffectHeal:
+		// D3 healing
+		healAmount := g.Roller.RollD3()
+		healed := 0
+		for i := range target.Models {
+			if healAmount <= 0 {
+				break
+			}
+			if target.Models[i].IsAlive && target.Models[i].CurrentWounds < target.Models[i].MaxWounds {
+				canHeal := target.Models[i].MaxWounds - target.Models[i].CurrentWounds
+				if canHeal > healAmount {
+					canHeal = healAmount
+				}
+				target.Models[i].CurrentWounds += canHeal
+				healAmount -= canHeal
+				healed += canHeal
+			}
+		}
+		g.Logf("    %s heals %d wounds on %s", spell.Name, healed, target.Name)
+		desc := fmt.Sprintf("%s cast %s on %s: healed %d wounds", caster.Name, spell.Name, target.Name, healed)
+		return command.Result{Description: desc, Success: true}, nil
+
+	case core.SpellEffectBuff:
+		// Mystic Shield: +1 save via rules engine (lasts until end of turn)
+		g.Rules.AddRule(rules.Rule{
+			Name:    fmt.Sprintf("MysticShield_%d", target.ID),
+			Trigger: rules.BeforeSaveRoll,
+			Source:  rules.SourceGlobal,
+			Condition: func(ctx *rules.Context) bool {
+				return ctx.Defender != nil && ctx.Defender.ID == target.ID
+			},
+			Apply: func(ctx *rules.Context) {
+				ctx.Modifiers.SaveMod += spell.EffectValue
+			},
+		})
+		g.Logf("    %s gains +%d to save rolls (Mystic Shield)", target.Name, spell.EffectValue)
+		desc := fmt.Sprintf("%s cast %s on %s: +%d save", caster.Name, spell.Name, target.Name, spell.EffectValue)
+		return command.Result{Description: desc, Success: true}, nil
+
+	default:
+		return command.Result{}, fmt.Errorf("unknown spell effect type")
+	}
+}
+
+// executeChant: AoS4 Rule 19.2. Priest rolls D6 >= chanting value.
+// Enemy priest within 30" can attempt to answer (unbind equivalent for prayers).
+func (g *Game) executeChant(cmd *command.ChantCommand) (command.Result, error) {
+	chanter := g.GetUnit(cmd.ChanterID)
+	if chanter == nil {
+		return command.Result{}, fmt.Errorf("chanter unit %d not found", cmd.ChanterID)
+	}
+	if chanter.OwnerID != cmd.OwnerID {
+		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.ChanterID, cmd.OwnerID)
+	}
+	if !chanter.CanChant() {
+		return command.Result{}, fmt.Errorf("unit %s cannot chant (not a priest or no chants remaining)", chanter.Name)
+	}
+	if cmd.PrayerIndex < 0 || cmd.PrayerIndex >= len(chanter.Prayers) {
+		return command.Result{}, fmt.Errorf("invalid prayer index %d", cmd.PrayerIndex)
+	}
+
+	target := g.GetUnit(cmd.TargetID)
+	if target == nil {
+		return command.Result{}, fmt.Errorf("target unit %d not found", cmd.TargetID)
+	}
+
+	prayer := chanter.Prayers[cmd.PrayerIndex]
+
+	// Validate target ownership vs prayer type
+	if prayer.TargetFriendly && target.OwnerID != chanter.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets friendly units, but target belongs to enemy", prayer.Name)
+	}
+	if !prayer.TargetFriendly && target.OwnerID == chanter.OwnerID {
+		return command.Result{}, fmt.Errorf("%s targets enemy units, but target is friendly", prayer.Name)
+	}
+
+	// Range check
+	dist := core.Distance(chanter.Position(), target.Position())
+	if dist > float64(prayer.Range) {
+		return command.Result{}, fmt.Errorf("target is out of prayer range (%.1f\" > %d\")", dist, prayer.Range)
+	}
+
+	chanter.ChantCount++
+
+	// Roll D6
+	chantRoll := g.Roller.RollD6()
+	g.Logf("    %s chants %s: rolled %d (needs %d)",
+		chanter.Name, prayer.Name, chantRoll, prayer.ChantingValue)
+
+	if chantRoll < prayer.ChantingValue {
+		desc := fmt.Sprintf("%s failed to chant %s (rolled %d, needed %d)", chanter.Name, prayer.Name, chantRoll, prayer.ChantingValue)
+		g.Logf("    %s", desc)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	// Answer attempt: closest enemy priest within 30"
+	if answered := g.attemptAnswer(chanter, chantRoll); answered {
+		desc := fmt.Sprintf("%s was answered (denied)!", prayer.Name)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	// Prayer succeeds - apply effect
+	return g.applyPrayerEffect(chanter, target, &prayer)
+}
+
+// attemptAnswer finds the closest enemy priest within 30" and tries to deny the prayer.
+// Returns true if the prayer was successfully denied.
+func (g *Game) attemptAnswer(chanter *core.Unit, chantRoll int) bool {
+	var bestPriest *core.Unit
+	bestDist := math.MaxFloat64
+
+	for _, u := range g.Units {
+		if u.OwnerID == chanter.OwnerID || u.IsDestroyed() {
+			continue
+		}
+		if !u.HasKeyword(core.KeywordPriest) {
+			continue
+		}
+		d := core.Distance(chanter.Position(), u.Position())
+		if d <= 30.0 && d < bestDist {
+			bestDist = d
+			bestPriest = u
+		}
+	}
+
+	if bestPriest == nil {
+		return false
+	}
+
+	answerRoll := g.Roller.RollD6()
+	g.Logf("    %s attempts to answer: rolled %d (needs > %d)",
+		bestPriest.Name, answerRoll, chantRoll)
+
+	if answerRoll > chantRoll {
+		g.Logf("    Prayer denied by %s!", bestPriest.Name)
+		return true
+	}
+	g.Logf("    Answer failed")
+	return false
+}
+
+// applyPrayerEffect resolves the effect of a successful prayer.
+func (g *Game) applyPrayerEffect(chanter *core.Unit, target *core.Unit, prayer *core.Prayer) (command.Result, error) {
+	switch prayer.Effect {
+	case core.SpellEffectDamage:
+		// D3 mortal wounds (Smite)
+		mortalDmg := g.Roller.RollD3()
+		g.Logf("    %s deals %d mortal wounds to %s", prayer.Name, mortalDmg, target.Name)
+		ResolveMortalWounds(g.Roller, target, mortalDmg)
+		g.CheckVictory()
+		desc := fmt.Sprintf("%s chanted %s on %s: %d mortal wounds", chanter.Name, prayer.Name, target.Name, mortalDmg)
+		return command.Result{Description: desc, Success: true}, nil
+
+	case core.SpellEffectHeal:
+		// D3 healing (Heal prayer)
+		healAmount := g.Roller.RollD3()
+		healed := 0
+		for i := range target.Models {
+			if healAmount <= 0 {
+				break
+			}
+			if target.Models[i].IsAlive && target.Models[i].CurrentWounds < target.Models[i].MaxWounds {
+				canHeal := target.Models[i].MaxWounds - target.Models[i].CurrentWounds
+				if canHeal > healAmount {
+					canHeal = healAmount
+				}
+				target.Models[i].CurrentWounds += canHeal
+				healAmount -= canHeal
+				healed += canHeal
+			}
+		}
+		g.Logf("    %s heals %d wounds on %s", prayer.Name, healed, target.Name)
+		desc := fmt.Sprintf("%s chanted %s on %s: healed %d wounds", chanter.Name, prayer.Name, target.Name, healed)
+		return command.Result{Description: desc, Success: true}, nil
+
+	default:
+		return command.Result{}, fmt.Errorf("unknown prayer effect type")
+	}
 }

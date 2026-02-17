@@ -39,6 +39,12 @@ type Unit struct {
 	WardSave    int         // Ward save value (0 = none, 6 = 6+, 5 = 5+)
 	StrikeOrder StrikeOrder // Determines combat activation priority
 
+	// Magic (AoS4 Rule 19.0 / 19.2)
+	Spells        []Spell  // Known spells (Wizards only)
+	Prayers       []Prayer // Known prayers (Priests only)
+	CastsPerTurn  int      // Max spells per hero phase (default 1 for Wizards)
+	ChantsPerTurn int      // Max prayers per hero phase (default 1 for Priests)
+
 	HasMoved     bool
 	HasRun       bool
 	HasRetreated bool
@@ -46,6 +52,9 @@ type Unit struct {
 	HasFought    bool
 	HasCharged   bool
 	HasPiledIn   bool
+	CastCount    int // Spells cast this turn
+	ChantCount   int // Prayers chanted this turn
+	UnbindCount  int // Unbind attempts used this turn
 }
 
 // Position returns the position of the unit leader (first alive model).
@@ -134,6 +143,38 @@ func (u *Unit) ResetPhaseFlags() {
 	u.HasFought = false
 	u.HasCharged = false
 	u.HasPiledIn = false
+	u.CastCount = 0
+	u.ChantCount = 0
+	u.UnbindCount = 0
+}
+
+// CanCast returns true if this unit is a Wizard with remaining casts.
+func (u *Unit) CanCast() bool {
+	if !u.HasKeyword(KeywordWizard) || len(u.Spells) == 0 {
+		return false
+	}
+	maxCasts := u.CastsPerTurn
+	if maxCasts <= 0 {
+		maxCasts = 1
+	}
+	return u.CastCount < maxCasts
+}
+
+// CanChant returns true if this unit is a Priest with remaining chants.
+func (u *Unit) CanChant() bool {
+	if !u.HasKeyword(KeywordPriest) || len(u.Prayers) == 0 {
+		return false
+	}
+	maxChants := u.ChantsPerTurn
+	if maxChants <= 0 {
+		maxChants = 1
+	}
+	return u.ChantCount < maxChants
+}
+
+// CanUnbind returns true if this Wizard hasn't used their unbind attempt this turn.
+func (u *Unit) CanUnbind() bool {
+	return u.HasKeyword(KeywordWizard) && !u.IsDestroyed() && u.UnbindCount == 0
 }
 
 // AllocateDamage distributes damage across models in the unit.

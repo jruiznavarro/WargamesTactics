@@ -58,6 +58,10 @@ type UnitView struct {
 	HasCharged    bool
 	HasPiledIn    bool
 	IsEngaged     bool
+	Spells        []SpellView
+	Prayers       []PrayerView
+	CanCast       bool
+	CanChant      bool
 }
 
 // WeaponView is a read-only view of a weapon.
@@ -70,6 +74,20 @@ type WeaponView struct {
 	Rend      int
 	Damage    int
 	Abilities core.WeaponAbility
+}
+
+// SpellView is a read-only view of a spell.
+type SpellView struct {
+	Name         string
+	CastingValue int
+	Range        int
+}
+
+// PrayerView is a read-only view of a prayer.
+type PrayerView struct {
+	Name          string
+	ChantingValue int
+	Range         int
 }
 
 // AllowedCommands returns the command types valid for the current phase.

@@ -26,6 +26,8 @@ func NewHeroPhase() Phase {
 	return Phase{
 		Type: PhaseHero,
 		AllowedCommands: []command.CommandType{
+			command.CommandTypeCast,
+			command.CommandTypeChant,
 			command.CommandTypeEndPhase,
 		},
 	}
