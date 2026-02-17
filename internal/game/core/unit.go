@@ -40,10 +40,10 @@ type Unit struct {
 	StrikeOrder StrikeOrder // Determines combat activation priority
 
 	// Magic (AoS4 Rule 19.0 / 19.2)
-	Spells        []Spell  // Known spells (Wizards only)
-	Prayers       []Prayer // Known prayers (Priests only)
-	CastsPerTurn  int      // Max spells per hero phase (default 1 for Wizards)
-	ChantsPerTurn int      // Max prayers per hero phase (default 1 for Priests)
+	Spells       []Spell  // Known spells (warscroll/faction specific)
+	Prayers      []Prayer // Known prayers (warscroll/faction specific)
+	PowerLevel   int      // Wizard(X) or Priest(X) - abilities per phase (default 1)
+	RitualPoints int      // Priests accumulate ritual points across turns
 
 	HasMoved     bool
 	HasRun       bool
@@ -52,9 +52,10 @@ type Unit struct {
 	HasFought    bool
 	HasCharged   bool
 	HasPiledIn   bool
-	CastCount    int // Spells cast this turn
-	ChantCount   int // Prayers chanted this turn
-	UnbindCount  int // Unbind attempts used this turn
+	CastCount    int  // Spell/banish abilities used this phase
+	ChantCount   int  // Prayer abilities used this phase
+	UnbindCount  int  // Unbind attempts used this phase
+	HasMiscast   bool // True if miscast this phase (no more spells)
 }
 
 // Position returns the position of the unit leader (first alive model).
@@ -135,6 +136,7 @@ func (u *Unit) HasKeyword(k Keyword) bool {
 }
 
 // ResetPhaseFlags resets all per-turn action flags.
+// Note: RitualPoints persist across turns and are NOT reset here.
 func (u *Unit) ResetPhaseFlags() {
 	u.HasMoved = false
 	u.HasRun = false
@@ -146,35 +148,46 @@ func (u *Unit) ResetPhaseFlags() {
 	u.CastCount = 0
 	u.ChantCount = 0
 	u.UnbindCount = 0
+	u.HasMiscast = false
 }
 
-// CanCast returns true if this unit is a Wizard with remaining casts.
+// effectivePowerLevel returns the power level, defaulting to 1.
+func (u *Unit) effectivePowerLevel() int {
+	if u.PowerLevel <= 0 {
+		return 1
+	}
+	return u.PowerLevel
+}
+
+// CanCast returns true if this Wizard has remaining spell/banish uses this phase.
+// A Wizard(X) can use X spell/banish abilities per hero phase.
+// Miscast prevents further casting.
 func (u *Unit) CanCast() bool {
 	if !u.HasKeyword(KeywordWizard) || len(u.Spells) == 0 {
 		return false
 	}
-	maxCasts := u.CastsPerTurn
-	if maxCasts <= 0 {
-		maxCasts = 1
+	if u.HasMiscast {
+		return false
 	}
-	return u.CastCount < maxCasts
+	return u.CastCount < u.effectivePowerLevel()
 }
 
-// CanChant returns true if this unit is a Priest with remaining chants.
+// CanChant returns true if this Priest has remaining prayer uses this phase.
+// A Priest(X) can use X prayer abilities per hero phase.
 func (u *Unit) CanChant() bool {
 	if !u.HasKeyword(KeywordPriest) || len(u.Prayers) == 0 {
 		return false
 	}
-	maxChants := u.ChantsPerTurn
-	if maxChants <= 0 {
-		maxChants = 1
-	}
-	return u.ChantCount < maxChants
+	return u.ChantCount < u.effectivePowerLevel()
 }
 
-// CanUnbind returns true if this Wizard hasn't used their unbind attempt this turn.
+// CanUnbind returns true if this Wizard has remaining unbind uses this phase.
+// A Wizard(X) can unbind X times per phase.
 func (u *Unit) CanUnbind() bool {
-	return u.HasKeyword(KeywordWizard) && !u.IsDestroyed() && u.UnbindCount == 0
+	if !u.HasKeyword(KeywordWizard) || u.IsDestroyed() {
+		return false
+	}
+	return u.UnbindCount < u.effectivePowerLevel()
 }
 
 // AllocateDamage distributes damage across models in the unit.

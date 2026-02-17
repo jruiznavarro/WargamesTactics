@@ -30,18 +30,22 @@ type Game struct {
 	Log            []string
 	IsOver         bool
 	Winner         int // Player ID of winner, -1 if draw
+
+	// Per-turn magic tracking: spell names cast this turn per player (same spell once per turn unless Unlimited)
+	SpellsCastThisTurn map[int]map[string]bool // playerID -> spell name -> cast
 }
 
 // NewGame creates a new game with the given seed and board dimensions.
 func NewGame(seed int64, boardWidth, boardHeight float64) *Game {
 	return &Game{
-		Board:      board.NewBoard(boardWidth, boardHeight),
-		Units:      make(map[core.UnitID]*core.Unit),
-		Roller:     dice.NewRoller(seed),
-		Rules:      rules.NewEngine(),
-		Commands:   commands.NewCommandTracker(),
-		NextUnitID: 1,
-		Winner:     -1,
+		Board:              board.NewBoard(boardWidth, boardHeight),
+		Units:              make(map[core.UnitID]*core.Unit),
+		Roller:             dice.NewRoller(seed),
+		Rules:              rules.NewEngine(),
+		Commands:           commands.NewCommandTracker(),
+		NextUnitID:         1,
+		Winner:             -1,
+		SpellsCastThisTurn: make(map[int]map[string]bool),
 	}
 }
 
@@ -631,11 +635,12 @@ func (g *Game) executeCharge(cmd *command.ChargeCommand) (command.Result, error)
 	return command.Result{Description: desc, Success: true}, nil
 }
 
-// ResetTurnFlags resets all unit action flags.
+// ResetTurnFlags resets all unit action flags and per-turn spell tracking.
 func (g *Game) ResetTurnFlags() {
 	for _, u := range g.Units {
 		u.ResetPhaseFlags()
 	}
+	g.SpellsCastThisTurn = make(map[int]map[string]bool)
 }
 
 // CheckVictory checks if a player has won.
@@ -1336,8 +1341,9 @@ func (g *Game) playerName(playerID int) string {
 }
 
 // executeCast: AoS4 Rule 19.0. Wizard rolls 2D6 >= casting value.
-// Natural doubles = empowered (cannot be unbound).
-// Enemy wizard within 30" can attempt to unbind by rolling 2D6 > casting roll.
+// Miscast on double 1s: fail + D3 mortal + no more spells this phase.
+// Same spell can only be cast once per turn per army (unless Unlimited).
+// Unbind: enemy wizard within 30" rolls 2D6 > casting roll.
 func (g *Game) executeCast(cmd *command.CastCommand) (command.Result, error) {
 	caster := g.GetUnit(cmd.CasterID)
 	if caster == nil {
@@ -1347,18 +1353,27 @@ func (g *Game) executeCast(cmd *command.CastCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("unit %d does not belong to player %d", cmd.CasterID, cmd.OwnerID)
 	}
 	if !caster.CanCast() {
-		return command.Result{}, fmt.Errorf("unit %s cannot cast (not a wizard or no casts remaining)", caster.Name)
+		return command.Result{}, fmt.Errorf("unit %s cannot cast (not a wizard, miscast, or no casts remaining)", caster.Name)
 	}
 	if cmd.SpellIndex < 0 || cmd.SpellIndex >= len(caster.Spells) {
 		return command.Result{}, fmt.Errorf("invalid spell index %d", cmd.SpellIndex)
+	}
+
+	spell := caster.Spells[cmd.SpellIndex]
+
+	// Same spell once per turn per army (unless Unlimited)
+	if !spell.Unlimited {
+		if playerSpells, ok := g.SpellsCastThisTurn[caster.OwnerID]; ok {
+			if playerSpells[spell.Name] {
+				return command.Result{}, fmt.Errorf("%s has already been cast this turn (not Unlimited)", spell.Name)
+			}
+		}
 	}
 
 	target := g.GetUnit(cmd.TargetID)
 	if target == nil {
 		return command.Result{}, fmt.Errorf("target unit %d not found", cmd.TargetID)
 	}
-
-	spell := caster.Spells[cmd.SpellIndex]
 
 	// Validate target ownership vs spell type
 	if spell.TargetFriendly && target.OwnerID != caster.OwnerID {
@@ -1380,14 +1395,21 @@ func (g *Game) executeCast(cmd *command.CastCommand) (command.Result, error) {
 	die1 := g.Roller.RollD6()
 	die2 := g.Roller.RollD6()
 	castingRoll := die1 + die2
-	empowered := die1 == die2 // Natural doubles = empowered
 
-	empStr := ""
-	if empowered {
-		empStr = " (EMPOWERED)"
+	g.Logf("    %s casts %s: rolled %d+%d = %d (needs %d)",
+		caster.Name, spell.Name, die1, die2, castingRoll, spell.CastingValue)
+
+	// Miscast: double 1s = fail + D3 mortal + no more spells this phase
+	if die1 == 1 && die2 == 1 {
+		caster.HasMiscast = true
+		mortalDmg := g.Roller.RollD3()
+		g.Logf("    MISCAST! %s suffers %d mortal damage and cannot cast again this phase",
+			caster.Name, mortalDmg)
+		ResolveMortalWounds(g.Roller, caster, mortalDmg)
+		g.CheckVictory()
+		desc := fmt.Sprintf("%s miscast %s! %d mortal damage", caster.Name, spell.Name, mortalDmg)
+		return command.Result{Description: desc, Success: false}, nil
 	}
-	g.Logf("    %s casts %s: rolled %d+%d = %d (needs %d)%s",
-		caster.Name, spell.Name, die1, die2, castingRoll, spell.CastingValue, empStr)
 
 	if castingRoll < spell.CastingValue {
 		desc := fmt.Sprintf("%s failed to cast %s (rolled %d, needed %d)", caster.Name, spell.Name, castingRoll, spell.CastingValue)
@@ -1395,20 +1417,24 @@ func (g *Game) executeCast(cmd *command.CastCommand) (command.Result, error) {
 		return command.Result{Description: desc, Success: false}, nil
 	}
 
-	// Unbind attempt: closest enemy wizard within 30" that hasn't unbound yet
-	if !empowered {
-		if unbound := g.attemptUnbind(caster, castingRoll); unbound {
-			desc := fmt.Sprintf("%s was unbound!", spell.Name)
-			return command.Result{Description: desc, Success: false}, nil
-		}
+	// Unbind attempt: closest enemy wizard within 30" that hasn't used all unbinds
+	if unbound := g.attemptUnbind(caster, castingRoll); unbound {
+		desc := fmt.Sprintf("%s was unbound!", spell.Name)
+		return command.Result{Description: desc, Success: false}, nil
 	}
+
+	// Track same-spell restriction
+	if g.SpellsCastThisTurn[caster.OwnerID] == nil {
+		g.SpellsCastThisTurn[caster.OwnerID] = make(map[string]bool)
+	}
+	g.SpellsCastThisTurn[caster.OwnerID][spell.Name] = true
 
 	// Spell succeeds - apply effect
 	return g.applySpellEffect(caster, target, &spell)
 }
 
 // attemptUnbind finds the closest enemy wizard within 30" and tries to unbind.
-// Returns true if the spell was successfully unbound.
+// A Wizard(X) can unbind X times per phase. Returns true if spell was unbound.
 func (g *Game) attemptUnbind(caster *core.Unit, castingRoll int) bool {
 	var bestWizard *core.Unit
 	bestDist := math.MaxFloat64
@@ -1448,7 +1474,6 @@ func (g *Game) attemptUnbind(caster *core.Unit, castingRoll int) bool {
 func (g *Game) applySpellEffect(caster *core.Unit, target *core.Unit, spell *core.Spell) (command.Result, error) {
 	switch spell.Effect {
 	case core.SpellEffectDamage:
-		// D3 mortal wounds
 		mortalDmg := g.Roller.RollD3()
 		g.Logf("    %s deals %d mortal wounds to %s", spell.Name, mortalDmg, target.Name)
 		ResolveMortalWounds(g.Roller, target, mortalDmg)
@@ -1457,31 +1482,15 @@ func (g *Game) applySpellEffect(caster *core.Unit, target *core.Unit, spell *cor
 		return command.Result{Description: desc, Success: true}, nil
 
 	case core.SpellEffectHeal:
-		// D3 healing
 		healAmount := g.Roller.RollD3()
-		healed := 0
-		for i := range target.Models {
-			if healAmount <= 0 {
-				break
-			}
-			if target.Models[i].IsAlive && target.Models[i].CurrentWounds < target.Models[i].MaxWounds {
-				canHeal := target.Models[i].MaxWounds - target.Models[i].CurrentWounds
-				if canHeal > healAmount {
-					canHeal = healAmount
-				}
-				target.Models[i].CurrentWounds += canHeal
-				healAmount -= canHeal
-				healed += canHeal
-			}
-		}
+		healed := g.healUnit(target, healAmount)
 		g.Logf("    %s heals %d wounds on %s", spell.Name, healed, target.Name)
 		desc := fmt.Sprintf("%s cast %s on %s: healed %d wounds", caster.Name, spell.Name, target.Name, healed)
 		return command.Result{Description: desc, Success: true}, nil
 
 	case core.SpellEffectBuff:
-		// Mystic Shield: +1 save via rules engine (lasts until end of turn)
 		g.Rules.AddRule(rules.Rule{
-			Name:    fmt.Sprintf("MysticShield_%d", target.ID),
+			Name:    fmt.Sprintf("SpellBuff_%s_%d", spell.Name, target.ID),
 			Trigger: rules.BeforeSaveRoll,
 			Source:  rules.SourceGlobal,
 			Condition: func(ctx *rules.Context) bool {
@@ -1491,7 +1500,7 @@ func (g *Game) applySpellEffect(caster *core.Unit, target *core.Unit, spell *cor
 				ctx.Modifiers.SaveMod += spell.EffectValue
 			},
 		})
-		g.Logf("    %s gains +%d to save rolls (Mystic Shield)", target.Name, spell.EffectValue)
+		g.Logf("    %s gains +%d to save rolls (%s)", target.Name, spell.EffectValue, spell.Name)
 		desc := fmt.Sprintf("%s cast %s on %s: +%d save", caster.Name, spell.Name, target.Name, spell.EffectValue)
 		return command.Result{Description: desc, Success: true}, nil
 
@@ -1500,8 +1509,9 @@ func (g *Game) applySpellEffect(caster *core.Unit, target *core.Unit, spell *cor
 	}
 }
 
-// executeChant: AoS4 Rule 19.2. Priest rolls D6 >= chanting value.
-// Enemy priest within 30" can attempt to answer (unbind equivalent for prayers).
+// executeChant: AoS4 Rule 19.2. Priest rolls D6 for ritual points.
+// Roll of 1: fail, remove D3 ritual points.
+// Roll of 2+: choose to bank points (= roll) or spend (ritual points + roll vs ChantingValue).
 func (g *Game) executeChant(cmd *command.ChantCommand) (command.Result, error) {
 	chanter := g.GetUnit(cmd.ChanterID)
 	if chanter == nil {
@@ -1517,14 +1527,61 @@ func (g *Game) executeChant(cmd *command.ChantCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("invalid prayer index %d", cmd.PrayerIndex)
 	}
 
+	prayer := chanter.Prayers[cmd.PrayerIndex]
+	chanter.ChantCount++
+
+	// Roll D6
+	chantRoll := g.Roller.RollD6()
+	g.Logf("    %s chants %s: rolled %d (ritual points: %d)",
+		chanter.Name, prayer.Name, chantRoll, chanter.RitualPoints)
+
+	// Unmodified 1: fail and remove D3 ritual points
+	if chantRoll == 1 {
+		lost := g.Roller.RollD3()
+		chanter.RitualPoints -= lost
+		if chanter.RitualPoints < 0 {
+			chanter.RitualPoints = 0
+		}
+		desc := fmt.Sprintf("%s failed chanting (rolled 1), lost %d ritual points (now %d)",
+			chanter.Name, lost, chanter.RitualPoints)
+		g.Logf("    %s", desc)
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	// Roll of 2+: bank or spend
+	if cmd.BankPoints {
+		// Bank: gain ritual points equal to roll
+		chanter.RitualPoints += chantRoll
+		desc := fmt.Sprintf("%s banks %d ritual points (now %d)",
+			chanter.Name, chantRoll, chanter.RitualPoints)
+		g.Logf("    %s", desc)
+		return command.Result{Description: desc, Success: true}, nil
+	}
+
+	// Spend: add ritual points to roll and check vs ChantingValue
+	total := chantRoll + chanter.RitualPoints
+	g.Logf("    %s spends ritual points: %d (roll) + %d (ritual) = %d (needs %d)",
+		chanter.Name, chantRoll, chanter.RitualPoints, total, prayer.ChantingValue)
+
+	if total < prayer.ChantingValue {
+		desc := fmt.Sprintf("%s failed to answer %s (total %d, needed %d)",
+			chanter.Name, prayer.Name, total, prayer.ChantingValue)
+		g.Logf("    %s", desc)
+		// Ritual points are NOT consumed on failure - player chose to spend but didn't meet threshold
+		// Actually per rules: "add the Priest's ritual points to the chanting roll" and if < CV, fail
+		// The points are still spent (reset to 0) regardless
+		chanter.RitualPoints = 0
+		return command.Result{Description: desc, Success: false}, nil
+	}
+
+	// Prayer answered - reset ritual points
+	chanter.RitualPoints = 0
+
+	// Validate target for prayer effect
 	target := g.GetUnit(cmd.TargetID)
 	if target == nil {
 		return command.Result{}, fmt.Errorf("target unit %d not found", cmd.TargetID)
 	}
-
-	prayer := chanter.Prayers[cmd.PrayerIndex]
-
-	// Validate target ownership vs prayer type
 	if prayer.TargetFriendly && target.OwnerID != chanter.OwnerID {
 		return command.Result{}, fmt.Errorf("%s targets friendly units, but target belongs to enemy", prayer.Name)
 	}
@@ -1532,106 +1589,71 @@ func (g *Game) executeChant(cmd *command.ChantCommand) (command.Result, error) {
 		return command.Result{}, fmt.Errorf("%s targets enemy units, but target is friendly", prayer.Name)
 	}
 
-	// Range check
 	dist := core.Distance(chanter.Position(), target.Position())
 	if dist > float64(prayer.Range) {
 		return command.Result{}, fmt.Errorf("target is out of prayer range (%.1f\" > %d\")", dist, prayer.Range)
 	}
 
-	chanter.ChantCount++
-
-	// Roll D6
-	chantRoll := g.Roller.RollD6()
-	g.Logf("    %s chants %s: rolled %d (needs %d)",
-		chanter.Name, prayer.Name, chantRoll, prayer.ChantingValue)
-
-	if chantRoll < prayer.ChantingValue {
-		desc := fmt.Sprintf("%s failed to chant %s (rolled %d, needed %d)", chanter.Name, prayer.Name, chantRoll, prayer.ChantingValue)
-		g.Logf("    %s", desc)
-		return command.Result{Description: desc, Success: false}, nil
-	}
-
-	// Answer attempt: closest enemy priest within 30"
-	if answered := g.attemptAnswer(chanter, chantRoll); answered {
-		desc := fmt.Sprintf("%s was answered (denied)!", prayer.Name)
-		return command.Result{Description: desc, Success: false}, nil
-	}
-
-	// Prayer succeeds - apply effect
+	g.Logf("    Prayer %s answered!", prayer.Name)
 	return g.applyPrayerEffect(chanter, target, &prayer)
 }
 
-// attemptAnswer finds the closest enemy priest within 30" and tries to deny the prayer.
-// Returns true if the prayer was successfully denied.
-func (g *Game) attemptAnswer(chanter *core.Unit, chantRoll int) bool {
-	var bestPriest *core.Unit
-	bestDist := math.MaxFloat64
-
-	for _, u := range g.Units {
-		if u.OwnerID == chanter.OwnerID || u.IsDestroyed() {
-			continue
-		}
-		if !u.HasKeyword(core.KeywordPriest) {
-			continue
-		}
-		d := core.Distance(chanter.Position(), u.Position())
-		if d <= 30.0 && d < bestDist {
-			bestDist = d
-			bestPriest = u
-		}
-	}
-
-	if bestPriest == nil {
-		return false
-	}
-
-	answerRoll := g.Roller.RollD6()
-	g.Logf("    %s attempts to answer: rolled %d (needs > %d)",
-		bestPriest.Name, answerRoll, chantRoll)
-
-	if answerRoll > chantRoll {
-		g.Logf("    Prayer denied by %s!", bestPriest.Name)
-		return true
-	}
-	g.Logf("    Answer failed")
-	return false
-}
-
-// applyPrayerEffect resolves the effect of a successful prayer.
+// applyPrayerEffect resolves the effect of a successfully answered prayer.
 func (g *Game) applyPrayerEffect(chanter *core.Unit, target *core.Unit, prayer *core.Prayer) (command.Result, error) {
 	switch prayer.Effect {
 	case core.SpellEffectDamage:
-		// D3 mortal wounds (Smite)
 		mortalDmg := g.Roller.RollD3()
 		g.Logf("    %s deals %d mortal wounds to %s", prayer.Name, mortalDmg, target.Name)
 		ResolveMortalWounds(g.Roller, target, mortalDmg)
 		g.CheckVictory()
-		desc := fmt.Sprintf("%s chanted %s on %s: %d mortal wounds", chanter.Name, prayer.Name, target.Name, mortalDmg)
+		desc := fmt.Sprintf("%s answered %s on %s: %d mortal wounds", chanter.Name, prayer.Name, target.Name, mortalDmg)
 		return command.Result{Description: desc, Success: true}, nil
 
 	case core.SpellEffectHeal:
-		// D3 healing (Heal prayer)
 		healAmount := g.Roller.RollD3()
-		healed := 0
-		for i := range target.Models {
-			if healAmount <= 0 {
-				break
-			}
-			if target.Models[i].IsAlive && target.Models[i].CurrentWounds < target.Models[i].MaxWounds {
-				canHeal := target.Models[i].MaxWounds - target.Models[i].CurrentWounds
-				if canHeal > healAmount {
-					canHeal = healAmount
-				}
-				target.Models[i].CurrentWounds += canHeal
-				healAmount -= canHeal
-				healed += canHeal
-			}
-		}
+		healed := g.healUnit(target, healAmount)
 		g.Logf("    %s heals %d wounds on %s", prayer.Name, healed, target.Name)
-		desc := fmt.Sprintf("%s chanted %s on %s: healed %d wounds", chanter.Name, prayer.Name, target.Name, healed)
+		desc := fmt.Sprintf("%s answered %s on %s: healed %d wounds", chanter.Name, prayer.Name, target.Name, healed)
+		return command.Result{Description: desc, Success: true}, nil
+
+	case core.SpellEffectBuff:
+		g.Rules.AddRule(rules.Rule{
+			Name:    fmt.Sprintf("PrayerBuff_%s_%d", prayer.Name, target.ID),
+			Trigger: rules.BeforeSaveRoll,
+			Source:  rules.SourceGlobal,
+			Condition: func(ctx *rules.Context) bool {
+				return ctx.Defender != nil && ctx.Defender.ID == target.ID
+			},
+			Apply: func(ctx *rules.Context) {
+				ctx.Modifiers.SaveMod += prayer.EffectValue
+			},
+		})
+		g.Logf("    %s gains +%d to save rolls (%s)", target.Name, prayer.EffectValue, prayer.Name)
+		desc := fmt.Sprintf("%s answered %s on %s: +%d save", chanter.Name, prayer.Name, target.Name, prayer.EffectValue)
 		return command.Result{Description: desc, Success: true}, nil
 
 	default:
 		return command.Result{}, fmt.Errorf("unknown prayer effect type")
 	}
+}
+
+// healUnit applies healing to a unit, distributing across wounded models. Returns total healed.
+func (g *Game) healUnit(target *core.Unit, amount int) int {
+	healed := 0
+	remaining := amount
+	for i := range target.Models {
+		if remaining <= 0 {
+			break
+		}
+		if target.Models[i].IsAlive && target.Models[i].CurrentWounds < target.Models[i].MaxWounds {
+			canHeal := target.Models[i].MaxWounds - target.Models[i].CurrentWounds
+			if canHeal > remaining {
+				canHeal = remaining
+			}
+			target.Models[i].CurrentWounds += canHeal
+			remaining -= canHeal
+			healed += canHeal
+		}
+	}
+	return healed
 }
