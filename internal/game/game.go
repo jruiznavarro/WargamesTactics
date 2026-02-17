@@ -44,23 +44,35 @@ type Game struct {
 	Battleplan *board.Battleplan // Active battleplan (nil = standard scoring)
 	// Pair control: which player controls each objective pair (pairID -> playerID, -1 = uncontrolled)
 	PairControl map[int]int
+
+	// GH 2025-26: Battle Tactics
+	BattleTactics map[int]*BattleTacticTracker // playerID -> tracker
+
+	// Per-turn tracking for battle tactic evaluation
+	UnitsDestroyedThisTurnMap map[int]int // attackerOwnerID -> count of enemy units destroyed this player turn
+
+	// GH 2025-26: Seize the Initiative
+	PreviousSecondPlayer int // Player index who went second in the previous round (-1 = first round)
 }
 
 // NewGame creates a new game with the given seed and board dimensions.
 func NewGame(seed int64, boardWidth, boardHeight float64) *Game {
 	return &Game{
-		Board:              board.NewBoard(boardWidth, boardHeight),
-		Units:              make(map[core.UnitID]*core.Unit),
-		Roller:             dice.NewRoller(seed),
-		Rules:              rules.NewEngine(),
-		Commands:           commands.NewCommandTracker(),
-		NextUnitID:         1,
-		Winner:             -1,
-		MaxBattleRounds:    5,
-		VictoryPoints:      make(map[int]int),
-		ObjectiveControl:   make(map[int]int),
-		SpellsCastThisTurn: make(map[int]map[string]bool),
-		PairControl:        make(map[int]int),
+		Board:                     board.NewBoard(boardWidth, boardHeight),
+		Units:                     make(map[core.UnitID]*core.Unit),
+		Roller:                    dice.NewRoller(seed),
+		Rules:                     rules.NewEngine(),
+		Commands:                  commands.NewCommandTracker(),
+		NextUnitID:                1,
+		Winner:                    -1,
+		MaxBattleRounds:           5,
+		VictoryPoints:             make(map[int]int),
+		ObjectiveControl:          make(map[int]int),
+		SpellsCastThisTurn:        make(map[int]map[string]bool),
+		PairControl:               make(map[int]int),
+		BattleTactics:             make(map[int]*BattleTacticTracker),
+		UnitsDestroyedThisTurnMap: make(map[int]int),
+		PreviousSecondPlayer:      -1,
 	}
 }
 
@@ -68,18 +80,21 @@ func NewGame(seed int64, boardWidth, boardHeight float64) *Game {
 // The board is set up with the battleplan's dimensions and Ghyranite objectives.
 func NewGameFromBattleplan(seed int64, bp *board.Battleplan) *Game {
 	g := &Game{
-		Board:              bp.SetupBoard(),
-		Units:              make(map[core.UnitID]*core.Unit),
-		Roller:             dice.NewRoller(seed),
-		Rules:              rules.NewEngine(),
-		Commands:           commands.NewCommandTracker(),
-		NextUnitID:         1,
-		Winner:             -1,
-		MaxBattleRounds:    5,
-		VictoryPoints:      make(map[int]int),
-		ObjectiveControl:   make(map[int]int),
-		SpellsCastThisTurn: make(map[int]map[string]bool),
-		PairControl:        make(map[int]int),
+		Board:                     bp.SetupBoard(),
+		Units:                     make(map[core.UnitID]*core.Unit),
+		Roller:                    dice.NewRoller(seed),
+		Rules:                     rules.NewEngine(),
+		Commands:                  commands.NewCommandTracker(),
+		NextUnitID:                1,
+		Winner:                    -1,
+		MaxBattleRounds:           5,
+		VictoryPoints:             make(map[int]int),
+		ObjectiveControl:          make(map[int]int),
+		SpellsCastThisTurn:        make(map[int]map[string]bool),
+		PairControl:               make(map[int]int),
+		BattleTactics:             make(map[int]*BattleTacticTracker),
+		UnitsDestroyedThisTurnMap: make(map[int]int),
+		PreviousSecondPlayer:      -1,
 		Battleplan:         bp,
 	}
 	return g
@@ -321,6 +336,64 @@ func (g *Game) View(playerID int) *GameView {
 		bpName = g.Battleplan.Name
 	}
 
+	// Build battle tactics views
+	btViews := make(map[int]*BattleTacticsView)
+	for pid, tracker := range g.BattleTactics {
+		btv := &BattleTacticsView{}
+
+		// Available cards
+		allCards := AllBattleTacticCards()
+		for _, card := range allCards {
+			if !tracker.AvailableCards[card.ID] {
+				continue
+			}
+			cv := BattleTacticCardView{
+				CardID:   int(card.ID),
+				CardName: card.Name,
+			}
+			tiers := [3]BattleTactic{card.Affray, card.Strike, card.Domination}
+			for i, t := range tiers {
+				cv.Tiers[i] = BattleTacticOptionView{
+					Tier:        t.Tier.String(),
+					Name:        t.Name,
+					Description: t.Description,
+					VP:          t.VP,
+				}
+			}
+			btv.AvailableCards = append(btv.AvailableCards, cv)
+		}
+
+		// Active tactic
+		if tracker.ActiveTactic != nil {
+			at := tracker.ActiveTactic
+			btv.ActiveTactic = &ActiveBattleTacticView{
+				CardName:    at.Tactic.CardName,
+				TacticName:  at.Tactic.Name,
+				Tier:        at.Tactic.Tier.String(),
+				Description: at.Tactic.Description,
+				VP:          at.Tactic.VP,
+				Completed:   at.Completed,
+			}
+		}
+
+		// History
+		var completedNames, failedNames []string
+		for _, t := range tracker.CompletedTactics {
+			completedNames = append(completedNames, t.Name)
+		}
+		for _, t := range tracker.FailedTactics {
+			failedNames = append(failedNames, t.Name)
+		}
+		btv.History = BattleTacticHistoryView{
+			CompletedCount: len(tracker.CompletedTactics),
+			FailedCount:    len(tracker.FailedTactics),
+			CompletedNames: completedNames,
+			FailedNames:    failedNames,
+		}
+
+		btViews[pid] = btv
+	}
+
 	return &GameView{
 		Units:           unitsByOwner,
 		Terrain:         terrainViews,
@@ -336,6 +409,7 @@ func (g *Game) View(playerID int) *GameView {
 		BattleplanName:  bpName,
 		CommandPoints:   cpMap,
 		VictoryPoints:   vpMap,
+		BattleTactics:   btViews,
 	}
 }
 
@@ -1050,6 +1124,134 @@ func (g *Game) ScoreEndOfTurnAuto(playerID int) int {
 	return g.ScoreEndOfTurn(playerID)
 }
 
+// --- Battle Tactics Integration ---
+
+// InitBattleTactics initializes battle tactic trackers for all players.
+func (g *Game) InitBattleTactics() {
+	for _, p := range g.Players {
+		g.BattleTactics[p.ID()] = NewBattleTacticTracker()
+	}
+}
+
+// SelectBattleTactic selects a battle tactic for a player this round.
+func (g *Game) SelectBattleTactic(playerID int, cardID BattleTacticCardID, tier BattleTacticTier) error {
+	tracker := g.BattleTactics[playerID]
+	if tracker == nil {
+		return fmt.Errorf("no battle tactic tracker for player %d", playerID)
+	}
+	if err := tracker.SelectTactic(cardID, tier); err != nil {
+		return err
+	}
+	g.Logf("  %s selects battle tactic: %s (%s - %s)",
+		g.playerName(playerID), tracker.ActiveTactic.Tactic.Name,
+		tracker.ActiveTactic.Tactic.CardName, tracker.ActiveTactic.Tactic.Tier)
+	return nil
+}
+
+// EvaluateAndScoreBattleTactic checks and scores the active battle tactic for a player.
+func (g *Game) EvaluateAndScoreBattleTactic(playerID int) int {
+	tracker := g.BattleTactics[playerID]
+	if tracker == nil || tracker.ActiveTactic == nil {
+		return 0
+	}
+
+	tactic := tracker.ActiveTactic.Tactic
+	if g.EvaluateBattleTactic(playerID, tactic) {
+		vp := tracker.CompleteTactic()
+		g.VictoryPoints[playerID] += vp
+		g.Logf("  Battle Tactic '%s' completed! +%d VP (total: %d)",
+			tactic.Name, vp, g.VictoryPoints[playerID])
+		return vp
+	}
+
+	tracker.FailTactic()
+	g.Logf("  Battle Tactic '%s' failed.", tactic.Name)
+	return 0
+}
+
+// UnitsDestroyedThisTurn returns the number of enemy units destroyed during this player's turn.
+// It counts units owned by opponents that are currently destroyed but were alive at turn start.
+func (g *Game) UnitsDestroyedThisTurn(playerID int) int {
+	return g.UnitsDestroyedThisTurnMap[playerID]
+}
+
+// SnapshotAliveUnits records which enemy units are alive at the start of a player's turn.
+// Call this before the turn starts, then call CountNewDestructions after to track kills.
+func (g *Game) SnapshotAliveUnits(playerID int) map[core.UnitID]bool {
+	snapshot := make(map[core.UnitID]bool)
+	for _, u := range g.Units {
+		if u.OwnerID != playerID && !u.IsDestroyed() {
+			snapshot[u.ID] = true
+		}
+	}
+	return snapshot
+}
+
+// CountNewDestructions compares current state against a snapshot to count newly destroyed enemy units.
+func (g *Game) CountNewDestructions(playerID int, snapshot map[core.UnitID]bool) int {
+	count := 0
+	for uid := range snapshot {
+		u := g.GetUnit(uid)
+		if u != nil && u.IsDestroyed() {
+			count++
+		}
+	}
+	return count
+}
+
+// --- Seize the Initiative ---
+
+// rollOffPriorityWithSeize implements the GH 2025-26 priority roll with Seize the Initiative.
+// From round 2+, the player who went second in the previous round can attempt to
+// Seize the Initiative by spending 1 CP (on a roll of 6+; underdog needs 5+).
+func (g *Game) rollOffPriorityWithSeize() (first, second int) {
+	first, second = g.rollOffPriority()
+
+	// Seize the Initiative: only from round 2+
+	if g.BattleRound <= 1 || g.PreviousSecondPlayer < 0 {
+		return first, second
+	}
+
+	// Only the player going second can attempt to seize
+	secondPlayerIdx := second
+	secondPlayerID := g.Players[secondPlayerIdx].ID()
+
+	// Must have been the one who went second before (they're the underdog in initiative)
+	if secondPlayerIdx != g.PreviousSecondPlayer {
+		return first, second
+	}
+
+	// Check if second player has CP to spend
+	state := g.Commands.GetState(secondPlayerID)
+	if state == nil || state.CommandPoints < 1 {
+		return first, second
+	}
+
+	// Attempt to seize: spend 1 CP, roll D6
+	state.CommandPoints--
+	seizeRoll := g.Roller.RollD6()
+	threshold := 6
+
+	// Underdog gets +1 to seize roll (needs 5+)
+	underdogID := g.determineUnderdog()
+	if underdogID == secondPlayerID {
+		threshold = 5
+		g.Logf("  %s attempts to Seize the Initiative (underdog, needs 5+): rolled %d",
+			g.Players[secondPlayerIdx].Name(), seizeRoll)
+	} else {
+		g.Logf("  %s attempts to Seize the Initiative (needs 6): rolled %d",
+			g.Players[secondPlayerIdx].Name(), seizeRoll)
+	}
+
+	if seizeRoll >= threshold {
+		g.Logf("  Seized! %s will go first instead!", g.Players[secondPlayerIdx].Name())
+		return second, first // Swap order
+	}
+
+	g.Logf("  Seize failed. Turn order unchanged.")
+	return first, second
+}
+
 // CheckFinalVictory determines the winner after all battle rounds are complete.
 func (g *Game) CheckFinalVictory() {
 	if g.BattleRound < g.MaxBattleRounds {
@@ -1445,12 +1647,16 @@ func (g *Game) runAlternatingPhase(turnPlayerIdx int, p phase.Phase) {
 func (g *Game) runPlayerTurn(playerIdx int) {
 	phases := phase.StandardTurnSequence()
 	player := g.Players[playerIdx]
+	playerID := player.ID()
 
 	g.Logf("--- %s's Turn ---", player.Name())
 
+	// Snapshot enemy alive units for destruction tracking
+	aliveSnapshot := g.SnapshotAliveUnits(playerID)
+
 	for _, p := range phases {
 		if g.IsOver {
-			return
+			break
 		}
 
 		g.CurrentPhase = p.Type
@@ -1466,6 +1672,9 @@ func (g *Game) runPlayerTurn(playerIdx int) {
 		// Clean up temporary rules from commands (All-out Attack/Defence)
 		g.CleanupPhaseRules()
 	}
+
+	// Update destruction count for battle tactic evaluation
+	g.UnitsDestroyedThisTurnMap[playerID] = g.CountNewDestructions(playerID, aliveSnapshot)
 }
 
 // RunGame executes the main game loop.
@@ -1475,32 +1684,64 @@ func (g *Game) RunGame(maxRounds int) {
 		return
 	}
 
+	// Initialize battle tactics if battleplan is active
+	if g.Battleplan != nil {
+		g.InitBattleTactics()
+	}
+
 	for round := 1; round <= maxRounds; round++ {
 		g.BattleRound = round
 		g.Logf("=== BATTLE ROUND %d ===", round)
 
-		first, second := g.rollOffPriority()
-		g.PriorityPlayer = first
+		// Priority roll with optional Seize the Initiative (GH 2025-26)
+		var first, second int
+		if g.Battleplan != nil && g.BattleRound > 1 {
+			// Initialize CP first so seize can spend them
+			underdogID := g.determineUnderdog()
+			playerIDs := make([]int, len(g.Players))
+			for i, p := range g.Players {
+				playerIDs[i] = p.ID()
+			}
+			g.Commands.InitRound(playerIDs, 4, underdogID)
 
-		// Initialize command points: 4 CP each, underdog gets +1
-		// Underdog = player with fewer total wounds remaining (-1 = no underdog)
-		underdogID := g.determineUnderdog()
-		playerIDs := make([]int, len(g.Players))
-		for i, p := range g.Players {
-			playerIDs[i] = p.ID()
-		}
-		g.Commands.InitRound(playerIDs, 4, underdogID)
+			if underdogID >= 0 {
+				for _, p := range g.Players {
+					if p.ID() == underdogID {
+						g.Logf("  %s is the underdog (+1 CP)", p.Name())
+					}
+				}
+			}
 
-		if underdogID >= 0 {
-			for _, p := range g.Players {
-				if p.ID() == underdogID {
-					g.Logf("  %s is the underdog (+1 CP)", p.Name())
+			first, second = g.rollOffPriorityWithSeize()
+		} else {
+			first, second = g.rollOffPriority()
+
+			// Initialize command points: 4 CP each, underdog gets +1
+			underdogID := g.determineUnderdog()
+			playerIDs := make([]int, len(g.Players))
+			for i, p := range g.Players {
+				playerIDs[i] = p.ID()
+			}
+			g.Commands.InitRound(playerIDs, 4, underdogID)
+
+			if underdogID >= 0 {
+				for _, p := range g.Players {
+					if p.ID() == underdogID {
+						g.Logf("  %s is the underdog (+1 CP)", p.Name())
+					}
 				}
 			}
 		}
+		g.PriorityPlayer = first
+
 		for _, p := range g.Players {
 			state := g.Commands.GetState(p.ID())
 			g.Logf("  %s: %d CP", p.Name(), state.CommandPoints)
+		}
+
+		// Reset battle tactic trackers for this round
+		for _, tracker := range g.BattleTactics {
+			tracker.ResetRound()
 		}
 
 		g.ResetTurnFlags()
@@ -1514,6 +1755,9 @@ func (g *Game) RunGame(maxRounds int) {
 		if g.IsOver {
 			return
 		}
+
+		// Track who went second for Seize the Initiative next round
+		g.PreviousSecondPlayer = second
 	}
 
 	if !g.IsOver {

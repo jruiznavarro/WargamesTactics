@@ -41,6 +41,46 @@ type PairView struct {
 	ControlledBy int    // Player who controls the pair, -1 if not controlled
 }
 
+// BattleTacticCardView is a read-only view of an available battle tactic card.
+type BattleTacticCardView struct {
+	CardID   int
+	CardName string
+	Tiers    [3]BattleTacticOptionView // Affray, Strike, Domination
+}
+
+// BattleTacticOptionView is a read-only view of a single tactic tier option.
+type BattleTacticOptionView struct {
+	Tier        string // "Affray", "Strike", "Domination"
+	Name        string
+	Description string
+	VP          int
+}
+
+// ActiveBattleTacticView is a read-only view of the currently selected battle tactic.
+type ActiveBattleTacticView struct {
+	CardName    string
+	TacticName  string
+	Tier        string
+	Description string
+	VP          int
+	Completed   bool
+}
+
+// BattleTacticHistoryView is a summary of completed/failed tactics.
+type BattleTacticHistoryView struct {
+	CompletedCount int
+	FailedCount    int
+	CompletedNames []string
+	FailedNames    []string
+}
+
+// BattleTacticsView is a read-only view of a player's battle tactic state.
+type BattleTacticsView struct {
+	AvailableCards []BattleTacticCardView   // Cards still available to pick
+	ActiveTactic   *ActiveBattleTacticView  // Currently selected (nil if none)
+	History        BattleTacticHistoryView  // Past results
+}
+
 // GameView provides a read-only snapshot of the game state.
 type GameView struct {
 	Units           map[int][]UnitView
@@ -57,6 +97,7 @@ type GameView struct {
 	BattleplanName  string      // Name of active battleplan ("" if none)
 	CommandPoints   map[int]int // CP remaining per player ID
 	VictoryPoints   map[int]int // VP per player ID
+	BattleTactics   map[int]*BattleTacticsView // playerID -> tactics view (GH 2025-26)
 }
 
 // TerritoryView is a read-only view of a deployment zone.
