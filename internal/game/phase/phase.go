@@ -10,8 +10,8 @@ const (
 	PhaseMovement    PhaseType = "Movement Phase"
 	PhaseCharging    PhaseType = "Charge Phase"
 	PhaseShooting    PhaseType = "Shooting Phase"
-	PhaseCombat      PhaseType = "Combat Phase"
-	PhaseBattleshock PhaseType = "Battleshock Phase"
+	PhaseCombat    PhaseType = "Combat Phase"
+	PhaseEndOfTurn PhaseType = "End of Turn"
 )
 
 // Phase defines the interface for a game phase.
@@ -26,6 +26,10 @@ func NewHeroPhase() Phase {
 	return Phase{
 		Type: PhaseHero,
 		AllowedCommands: []command.CommandType{
+			command.CommandTypeCast,
+			command.CommandTypeChant,
+			command.CommandTypeRally,
+			command.CommandTypeMagicalIntervention,
 			command.CommandTypeEndPhase,
 		},
 	}
@@ -37,6 +41,8 @@ func NewMovementPhase() Phase {
 		Type: PhaseMovement,
 		AllowedCommands: []command.CommandType{
 			command.CommandTypeMove,
+			command.CommandTypeRun,
+			command.CommandTypeRetreat,
 			command.CommandTypeEndPhase,
 		},
 	}
@@ -71,6 +77,7 @@ func NewCombatPhase() Phase {
 	return Phase{
 		Type: PhaseCombat,
 		AllowedCommands: []command.CommandType{
+			command.CommandTypePileIn,
 			command.CommandTypeFight,
 			command.CommandTypeEndPhase,
 		},
@@ -78,10 +85,11 @@ func NewCombatPhase() Phase {
 	}
 }
 
-// NewBattleshockPhase creates the battleshock phase.
-func NewBattleshockPhase() Phase {
+// NewEndOfTurnPhase creates the end of turn phase.
+// Used for scoring objectives, triggering end-of-turn abilities, etc.
+func NewEndOfTurnPhase() Phase {
 	return Phase{
-		Type: PhaseBattleshock,
+		Type: PhaseEndOfTurn,
 		AllowedCommands: []command.CommandType{
 			command.CommandTypeEndPhase,
 		},
@@ -96,7 +104,7 @@ func StandardTurnSequence() []Phase {
 		NewShootingPhase(),
 		NewChargePhase(),
 		NewCombatPhase(),
-		NewBattleshockPhase(),
+		NewEndOfTurnPhase(),
 	}
 }
 

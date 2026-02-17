@@ -1,0 +1,646 @@
+{
+  "id": "seraphon",
+  "name": "Seraphon",
+  "grandAlliance": "Order",
+  "battleTraits": [
+    {
+      "name": "Scaly Skin",
+      "description": "SAURUS units have Ward 6+.",
+      "phase": "passive",
+      "effect": "saurusWard",
+      "value": 6
+    },
+    {
+      "name": "Predatory Fighters",
+      "description": "Each time a friendly SAURUS unit completes a charge move, add 1 to the Attacks characteristic of that unit's melee weapons until the end of the turn.",
+      "phase": "combat",
+      "effect": "chargeAttackBonus",
+      "value": 1
+    },
+    {
+      "name": "Cold-blooded",
+      "description": "Friendly SERAPHON units wholly within 12\" of a friendly SERAPHON HERO ignore negative modifiers to characteristics.",
+      "phase": "passive",
+      "effect": "ignoreNegativeMods",
+      "value": 12
+    }
+  ],
+  "spellLore": [
+    {
+      "name": "Stellar Tempest",
+      "castingValue": 8,
+      "range": 18,
+      "effect": "damage",
+      "effectValue": 4,
+      "targetAlly": false,
+      "unlimited": false
+    },
+    {
+      "name": "Mystical Unforging",
+      "castingValue": 7,
+      "range": 18,
+      "effect": "damage",
+      "effectValue": 2,
+      "targetAlly": false,
+      "unlimited": false
+    },
+    {
+      "name": "Celestial Harmony",
+      "castingValue": 6,
+      "range": 12,
+      "effect": "buff",
+      "effectValue": 1,
+      "targetAlly": true,
+      "unlimited": false
+    }
+  ],
+  "prayerLore": [
+    {
+      "name": "Celestial Rites",
+      "chantingValue": 4,
+      "range": 12,
+      "effect": "buff",
+      "effectValue": 1,
+      "targetAlly": true,
+      "unlimited": false
+    },
+    {
+      "name": "Curse of Fates",
+      "chantingValue": 5,
+      "range": 12,
+      "effect": "damage",
+      "effectValue": 2,
+      "targetAlly": false,
+      "unlimited": false
+    }
+  ],
+  "formations": [
+    {
+      "name": "Sunclaw Temple-host",
+      "description": "Each time a friendly SAURUS unit completes a charge move, add 1 to the Rend characteristic of that unit's melee weapons until the end of the turn.",
+      "effects": [
+        {
+          "description": "+1 Rend for Saurus melee weapons on charge turn",
+          "targetTag": "Saurus",
+          "effect": "chargeRendBonus",
+          "value": 1,
+          "condition": "charged"
+        }
+      ]
+    },
+    {
+      "name": "Starborne Host",
+      "description": "Friendly SERAPHON units that are wholly within 12\" of a friendly SERAPHON WIZARD have Ward 6+.",
+      "effects": [
+        {
+          "description": "Ward 6+ when near a friendly Wizard",
+          "targetTag": "",
+          "effect": "wardNearWizard",
+          "value": 6,
+          "condition": "nearWizard"
+        }
+      ]
+    },
+    {
+      "name": "Shadowstrike Starhost",
+      "description": "Friendly SKINK units can be set up in reserve and arrive more than 9\" from enemy units. +1 to charge rolls for SKINK units.",
+      "effects": [
+        {
+          "description": "+1 to charge rolls for Skink units",
+          "targetTag": "Skink",
+          "effect": "chargeBonus",
+          "value": 1,
+          "condition": "always"
+        }
+      ]
+    }
+  ],
+  "heroicTraits": [
+    {
+      "name": "Dominating Mind",
+      "description": "Friendly SERAPHON units wholly within 12\" do not take battleshock tests.",
+      "type": "heroicTrait",
+      "effect": "noBattleshock",
+      "value": 12
+    },
+    {
+      "name": "Vengeful Defender",
+      "description": "+1 to wound rolls for this unit if any friendly units have been destroyed.",
+      "type": "heroicTrait",
+      "effect": "woundBonusOnLoss",
+      "value": 1
+    },
+    {
+      "name": "Disciplined Fury",
+      "description": "If this unit is destroyed in combat, it can fight immediately before being removed.",
+      "type": "heroicTrait",
+      "effect": "fightOnDeath",
+      "value": 0
+    }
+  ],
+  "artefacts": [
+    {
+      "name": "Serpent God Dagger",
+      "description": "Pick 1 of this unit's melee weapons. Add 1 to that weapon's Rend characteristic.",
+      "type": "artefact",
+      "effect": "extraRend",
+      "value": 1
+    },
+    {
+      "name": "Aetherquartz Brooch",
+      "description": "Each time an enemy WIZARD within 18\" successfully casts a spell, roll a D6. On a 4+, you receive 1 command point.",
+      "type": "artefact",
+      "effect": "cpOnEnemyCast",
+      "value": 1
+    },
+    {
+      "name": "Itxi Grubs",
+      "description": "At the start of your hero phase, heal D3 wounds allocated to this unit.",
+      "type": "artefact",
+      "effect": "healStart",
+      "value": 2
+    }
+  ],
+  "warscrolls": [
+    {
+      "id": "seraphon_lord_kroak",
+      "name": "Lord Kroak",
+      "faction": "seraphon",
+      "points": 420,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 100,
+      "keywords": ["Hero", "Monster", "Wizard", "Fly"],
+      "tags": ["Slann"],
+      "unique": true,
+      "stats": {"move": 8, "save": 4, "control": 5, "health": 18},
+      "weapons": [
+        {"name": "Celestial Deliverance", "range": 18, "attacks": 4, "hit": 3, "wound": 3, "rend": 2, "damage": 3, "abilities": ["Crit(Mortal)"]},
+        {"name": "Azyrite Force Barrier", "range": 0, "attacks": 3, "hit": 4, "wound": 3, "rend": 1, "damage": 2, "abilities": []}
+      ],
+      "wardSave": 4,
+      "powerLevel": 3,
+      "spells": [
+        {"name": "Celestial Deliverance", "castingValue": 7, "range": 18, "effect": "damage", "effectValue": 3, "targetAlly": false, "unlimited": false},
+        {"name": "Comet's Call", "castingValue": 8, "range": 24, "effect": "damage", "effectValue": 4, "targetAlly": false, "unlimited": false}
+      ],
+      "prayers": [],
+      "abilities": [
+        {"name": "Dead for Innumerable Ages", "description": "Ward 4+.", "phase": "passive", "effect": "ward", "value": 4},
+        {"name": "Arcane Vassal", "description": "Use a friendly Seraphon Wizard within 12\" as the origin for spells.", "phase": "hero", "effect": "arcaneVassal", "value": 12}
+      ]
+    },
+    {
+      "id": "seraphon_slann_starmaster",
+      "name": "Slann Starmaster",
+      "faction": "seraphon",
+      "points": 260,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 50,
+      "keywords": ["Hero", "Wizard"],
+      "tags": ["Slann"],
+      "unique": false,
+      "stats": {"move": 5, "save": 4, "control": 2, "health": 12},
+      "weapons": [
+        {"name": "Arcane Bolt", "range": 18, "attacks": 3, "hit": 3, "wound": 3, "rend": 1, "damage": 2, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 2,
+      "spells": [
+        {"name": "Celestial Channelling", "castingValue": 6, "range": 0, "effect": "buff", "effectValue": 1, "targetAlly": true, "unlimited": false}
+      ],
+      "prayers": [],
+      "abilities": [
+        {"name": "Celestial Channelling", "description": "Friendly Seraphon Wizards wholly within 12\" get -1 to casting values.", "phase": "passive", "effect": "castingBonus", "value": 12}
+      ]
+    },
+    {
+      "id": "seraphon_saurus_oldblood_on_carnosaur",
+      "name": "Saurus Oldblood on Carnosaur",
+      "faction": "seraphon",
+      "points": 280,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 120,
+      "keywords": ["Hero", "Monster", "Cavalry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 10, "save": 4, "control": 5, "health": 14},
+      "weapons": [
+        {"name": "Sunstone Spear", "range": 0, "attacks": 5, "hit": 3, "wound": 3, "rend": 2, "damage": 2, "abilities": ["Charge"]},
+        {"name": "Carnosaur Jaws", "range": 0, "attacks": 3, "hit": 4, "wound": 2, "rend": 2, "damage": 3, "abilities": ["Anti-Monster", "Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Bloodroar", "description": "Enemy units within 12\" cannot use Rally.", "phase": "passive", "effect": "noRally", "value": 12},
+        {"name": "Terror", "description": "Subtract 1 from hit rolls for attacks that target this unit.", "phase": "combat", "effect": "minusOneToBeHit", "value": 1}
+      ]
+    },
+    {
+      "id": "seraphon_saurus_scar_veteran_on_aggradon",
+      "name": "Saurus Scar-Veteran on Aggradon",
+      "faction": "seraphon",
+      "points": 150,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 75,
+      "keywords": ["Hero", "Cavalry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 10, "save": 4, "control": 2, "health": 8},
+      "weapons": [
+        {"name": "Celestite Polearm", "range": 0, "attacks": 4, "hit": 3, "wound": 3, "rend": 1, "damage": 2, "abilities": ["Anti-Monster"]},
+        {"name": "Aggradon Jaws", "range": 0, "attacks": 3, "hit": 4, "wound": 3, "rend": 1, "damage": 1, "abilities": ["Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Primal Rage", "description": "If charged, Aggradon attacks get +1 to hit.", "phase": "combat", "effect": "chargeHitBonus", "value": 1}
+      ]
+    },
+    {
+      "id": "seraphon_saurus_astrolith_bearer",
+      "name": "Saurus Astrolith Bearer",
+      "faction": "seraphon",
+      "points": 150,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 40,
+      "keywords": ["Hero", "Infantry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 5, "save": 4, "control": 2, "health": 7},
+      "weapons": [
+        {"name": "Celestite War-pick", "range": 0, "attacks": 4, "hit": 3, "wound": 3, "rend": 1, "damage": 2, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Celestial Conduit", "description": "Add 1 to casting and chanting rolls for friendly Seraphon units wholly within 12\".", "phase": "passive", "effect": "castingBonus", "value": 12},
+        {"name": "Revivifying Energies", "description": "Heal D3 wounds to each friendly Seraphon unit wholly within 12\".", "phase": "hero", "effect": "areaHeal", "value": 12}
+      ]
+    },
+    {
+      "id": "seraphon_skink_starseer",
+      "name": "Skink Starseer",
+      "faction": "seraphon",
+      "points": 120,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 32,
+      "keywords": ["Hero", "Wizard", "Infantry"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 5, "save": 5, "control": 2, "health": 5},
+      "weapons": [
+        {"name": "Astromancer's Staff", "range": 12, "attacks": 2, "hit": 3, "wound": 4, "rend": 1, "damage": 2, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 1,
+      "spells": [
+        {"name": "Control Fate", "castingValue": 7, "range": 18, "effect": "buff", "effectValue": 1, "targetAlly": true, "unlimited": false}
+      ],
+      "prayers": [],
+      "abilities": [
+        {"name": "Astromancer", "description": "Once per battle, pick a friendly unit within 12\" for +1 save until next hero phase.", "phase": "hero", "effect": "saveBonus", "value": 1}
+      ]
+    },
+    {
+      "id": "seraphon_skink_starpriest",
+      "name": "Skink Starpriest",
+      "faction": "seraphon",
+      "points": 100,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 32,
+      "keywords": ["Hero", "Priest", "Infantry"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 5, "save": 5, "control": 2, "health": 5},
+      "weapons": [
+        {"name": "Star-stone Staff", "range": 12, "attacks": 2, "hit": 3, "wound": 4, "rend": 1, "damage": 1, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 1,
+      "spells": [],
+      "prayers": [
+        {"name": "Blazing Starlight", "chantingValue": 4, "range": 12, "effect": "buff", "effectValue": 1, "targetAlly": true, "unlimited": false}
+      ],
+      "abilities": []
+    },
+    {
+      "id": "seraphon_skink_oracle_on_troglodon",
+      "name": "Skink Oracle on Troglodon",
+      "faction": "seraphon",
+      "points": 230,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 120,
+      "keywords": ["Hero", "Monster", "Cavalry", "Wizard"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 10, "save": 4, "control": 5, "health": 12},
+      "weapons": [
+        {"name": "Noxious Spittle", "range": 12, "attacks": 1, "hit": 3, "wound": 3, "rend": 2, "damage": 3, "abilities": ["Crit(Mortal)"]},
+        {"name": "Troglodon Jaws", "range": 0, "attacks": 4, "hit": 4, "wound": 2, "rend": 2, "damage": 2, "abilities": ["Companion"]},
+        {"name": "Divining Rod", "range": 0, "attacks": 2, "hit": 4, "wound": 4, "rend": 0, "damage": 1, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 1,
+      "spells": [
+        {"name": "Primordial Mire", "castingValue": 6, "range": 12, "effect": "damage", "effectValue": 2, "targetAlly": false, "unlimited": false}
+      ],
+      "prayers": [],
+      "abilities": [
+        {"name": "Regeneration", "description": "Heal D3 wounds in each hero phase.", "phase": "hero", "effect": "selfHeal", "value": 2}
+      ]
+    },
+    {
+      "id": "seraphon_saurus_warriors",
+      "name": "Saurus Warriors",
+      "faction": "seraphon",
+      "points": 120,
+      "unitSize": 10,
+      "maxSize": 20,
+      "baseSizeMM": 32,
+      "keywords": ["Infantry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 5, "save": 4, "control": 1, "health": 1},
+      "weapons": [
+        {"name": "Celestite Weapon", "range": 0, "attacks": 2, "hit": 4, "wound": 3, "rend": 1, "damage": 1, "abilities": ["Anti-Monster"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Ordered Cohort", "description": "Add 1 to hit rolls if 10+ models.", "phase": "combat", "effect": "hitBonusOnSize", "value": 10}
+      ]
+    },
+    {
+      "id": "seraphon_saurus_guard",
+      "name": "Saurus Guard",
+      "faction": "seraphon",
+      "points": 140,
+      "unitSize": 5,
+      "maxSize": 10,
+      "baseSizeMM": 32,
+      "keywords": ["Infantry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 5, "save": 4, "control": 1, "health": 2},
+      "weapons": [
+        {"name": "Celestite Polearm", "range": 0, "attacks": 2, "hit": 3, "wound": 4, "rend": 1, "damage": 1, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Selfless Protectors", "description": "Friendly Seraphon Hero wholly within 3\" has Ward 5+.", "phase": "passive", "effect": "heroWard", "value": 5}
+      ]
+    },
+    {
+      "id": "seraphon_skinks",
+      "name": "Skinks",
+      "faction": "seraphon",
+      "points": 80,
+      "unitSize": 10,
+      "maxSize": 20,
+      "baseSizeMM": 25,
+      "keywords": ["Infantry"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 8, "save": 6, "control": 1, "health": 1},
+      "weapons": [
+        {"name": "Meteoric Javelins", "range": 12, "attacks": 1, "hit": 4, "wound": 5, "rend": 0, "damage": 1, "abilities": []},
+        {"name": "Celestite Dagger", "range": 0, "attacks": 1, "hit": 5, "wound": 5, "rend": 0, "damage": 1, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Star-buckler", "description": "+1 to save in melee if equipped with buckler.", "phase": "combat", "effect": "saveBonus", "value": 1}
+      ]
+    },
+    {
+      "id": "seraphon_kroxigor",
+      "name": "Kroxigor",
+      "faction": "seraphon",
+      "points": 150,
+      "unitSize": 3,
+      "maxSize": 6,
+      "baseSizeMM": 50,
+      "keywords": ["Infantry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 6, "save": 4, "control": 2, "health": 4},
+      "weapons": [
+        {"name": "Drakebite Maul", "range": 0, "attacks": 4, "hit": 4, "wound": 2, "rend": 2, "damage": 2, "abilities": ["Anti-Infantry"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Brutal Charge", "description": "+1 Damage on the turn this unit charges.", "phase": "combat", "effect": "chargeDamageBonus", "value": 1}
+      ]
+    },
+    {
+      "id": "seraphon_aggradon_lancers",
+      "name": "Aggradon Lancers",
+      "faction": "seraphon",
+      "points": 190,
+      "unitSize": 3,
+      "maxSize": 6,
+      "baseSizeMM": 75,
+      "keywords": ["Cavalry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 10, "save": 4, "control": 2, "health": 5},
+      "weapons": [
+        {"name": "Celestite Lance", "range": 0, "attacks": 3, "hit": 3, "wound": 3, "rend": 1, "damage": 2, "abilities": ["Charge"]},
+        {"name": "Aggradon Jaws", "range": 0, "attacks": 2, "hit": 4, "wound": 3, "rend": 1, "damage": 1, "abilities": ["Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Primal Rage", "description": "After charging, Aggradon attacks get +1 to hit.", "phase": "combat", "effect": "chargeHitBonus", "value": 1}
+      ]
+    },
+    {
+      "id": "seraphon_stegadon",
+      "name": "Stegadon",
+      "faction": "seraphon",
+      "points": 250,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 120,
+      "keywords": ["Monster", "Cavalry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 8, "save": 4, "control": 5, "health": 12},
+      "weapons": [
+        {"name": "Skystreak Bow", "range": 24, "attacks": 3, "hit": 3, "wound": 3, "rend": 1, "damage": 2, "abilities": []},
+        {"name": "Massive Horns", "range": 0, "attacks": 3, "hit": 4, "wound": 2, "rend": 2, "damage": 3, "abilities": ["Charge", "Companion"]},
+        {"name": "Crushing Stomps", "range": 0, "attacks": 5, "hit": 4, "wound": 3, "rend": 1, "damage": 1, "abilities": ["Anti-Infantry", "Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Unstoppable Stampede", "description": "D3 mortal wounds to enemy unit charged.", "phase": "charge", "effect": "mortalOnCharge", "value": 2}
+      ]
+    },
+    {
+      "id": "seraphon_bastiladon",
+      "name": "Bastiladon",
+      "faction": "seraphon",
+      "points": 210,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 120,
+      "keywords": ["Monster", "Cavalry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 5, "save": 3, "control": 5, "health": 12},
+      "weapons": [
+        {"name": "Solar Engine", "range": 24, "attacks": 6, "hit": 3, "wound": 3, "rend": 2, "damage": 2, "abilities": ["Shoot in Combat"]},
+        {"name": "Bludgeoning Tail", "range": 0, "attacks": 3, "hit": 4, "wound": 3, "rend": 0, "damage": 1, "abilities": ["Anti-Infantry", "Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Impervious Defence", "description": "Ward 6+.", "phase": "passive", "effect": "ward", "value": 6}
+      ]
+    },
+    {
+      "id": "seraphon_raptadon_hunters",
+      "name": "Raptadon Hunters",
+      "faction": "seraphon",
+      "points": 100,
+      "unitSize": 5,
+      "maxSize": 10,
+      "baseSizeMM": 75,
+      "keywords": ["Cavalry"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 12, "save": 5, "control": 1, "health": 3},
+      "weapons": [
+        {"name": "Celestite Javelin", "range": 12, "attacks": 1, "hit": 3, "wound": 4, "rend": 1, "damage": 1, "abilities": []},
+        {"name": "Raptadon Talons", "range": 0, "attacks": 2, "hit": 4, "wound": 4, "rend": 0, "damage": 1, "abilities": ["Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": []
+    },
+    {
+      "id": "seraphon_raptadon_chargers",
+      "name": "Raptadon Chargers",
+      "faction": "seraphon",
+      "points": 120,
+      "unitSize": 5,
+      "maxSize": 10,
+      "baseSizeMM": 75,
+      "keywords": ["Cavalry"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 12, "save": 5, "control": 1, "health": 3},
+      "weapons": [
+        {"name": "Celestite Lance", "range": 0, "attacks": 2, "hit": 3, "wound": 4, "rend": 1, "damage": 1, "abilities": ["Charge"]},
+        {"name": "Raptadon Talons", "range": 0, "attacks": 2, "hit": 4, "wound": 4, "rend": 0, "damage": 1, "abilities": ["Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": []
+    },
+    {
+      "id": "seraphon_terrawings",
+      "name": "Terrawings",
+      "faction": "seraphon",
+      "points": 80,
+      "unitSize": 3,
+      "maxSize": 6,
+      "baseSizeMM": 50,
+      "keywords": ["Infantry", "Fly"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 12, "save": 6, "control": 1, "health": 3},
+      "weapons": [
+        {"name": "Razor-sharp Beak", "range": 0, "attacks": 3, "hit": 4, "wound": 4, "rend": 0, "damage": 1, "abilities": ["Charge"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": []
+    },
+    {
+      "id": "seraphon_hunters_of_huanchi",
+      "name": "Hunters of Huanchi",
+      "faction": "seraphon",
+      "points": 70,
+      "unitSize": 5,
+      "maxSize": 10,
+      "baseSizeMM": 25,
+      "keywords": ["Infantry"],
+      "tags": ["Skink"],
+      "unique": false,
+      "stats": {"move": 8, "save": 6, "control": 1, "health": 1},
+      "weapons": [
+        {"name": "Dartpipe", "range": 12, "attacks": 1, "hit": 4, "wound": 5, "rend": 0, "damage": 1, "abilities": ["Crit(Mortal)"]},
+        {"name": "Star-stone Dagger", "range": 0, "attacks": 1, "hit": 5, "wound": 5, "rend": 0, "damage": 1, "abilities": []}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Masters of Ambush", "description": "Can set up in reserve and arrive in enemy territory.", "phase": "movement", "effect": "ambush", "value": 0}
+      ]
+    },
+    {
+      "id": "seraphon_spawn_of_chotec",
+      "name": "Spawn of Chotec",
+      "faction": "seraphon",
+      "points": 250,
+      "unitSize": 1,
+      "maxSize": 0,
+      "baseSizeMM": 120,
+      "keywords": ["Monster", "Cavalry"],
+      "tags": ["Saurus"],
+      "unique": false,
+      "stats": {"move": 10, "save": 4, "control": 5, "health": 10},
+      "weapons": [
+        {"name": "Fiery Breath", "range": 12, "attacks": 4, "hit": 2, "wound": 4, "rend": 1, "damage": 2, "abilities": ["Shoot in Combat"]},
+        {"name": "Blazing Claws", "range": 0, "attacks": 4, "hit": 3, "wound": 3, "rend": 2, "damage": 2, "abilities": ["Companion"]}
+      ],
+      "wardSave": 0,
+      "powerLevel": 0,
+      "spells": [],
+      "prayers": [],
+      "abilities": [
+        {"name": "Chotec's Wrath", "description": "When this unit is destroyed, D3 mortal wounds to enemy units within 3\".", "phase": "passive", "effect": "deathExplosion", "value": 2}
+      ]
+    }
+  ]
+}

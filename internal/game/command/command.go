@@ -7,10 +7,17 @@ type CommandType string
 
 const (
 	CommandTypeMove     CommandType = "move"
+	CommandTypeRun      CommandType = "run"
+	CommandTypeRetreat  CommandType = "retreat"
 	CommandTypeShoot    CommandType = "shoot"
 	CommandTypeFight    CommandType = "fight"
 	CommandTypeCharge   CommandType = "charge"
-	CommandTypeEndPhase CommandType = "end_phase"
+	CommandTypePileIn   CommandType = "pile_in"
+	CommandTypeCast                CommandType = "cast"
+	CommandTypeChant               CommandType = "chant"
+	CommandTypeRally               CommandType = "rally"
+	CommandTypeMagicalIntervention CommandType = "magical_intervention"
+	CommandTypeEndPhase            CommandType = "end_phase"
 )
 
 // Result holds the outcome of an executed command.

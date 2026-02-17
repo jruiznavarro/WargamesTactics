@@ -2,64 +2,169 @@ package game
 
 import (
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
+	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/phase"
 )
 
 // Player is the interface that both human and AI players implement.
 type Player interface {
-	// GetNextCommand asks the player for their next command during a phase.
-	// Returning nil signals the player wants to end the phase.
 	GetNextCommand(view *GameView, currentPhase phase.Phase) interface{}
-	// ID returns the player's unique identifier.
 	ID() int
-	// Name returns the player's display name.
 	Name() string
 }
 
-// GameView provides a read-only snapshot of the game state for a specific player.
-type GameView struct {
-	Units        map[int][]UnitView // Units by owner player ID
-	BoardWidth   float64
-	BoardHeight  float64
-	CurrentPhase phase.PhaseType
-	BattleRound  int
-	ActivePlayer int
+// TerrainView is a read-only view of a terrain feature.
+type TerrainView struct {
+	Name   string
+	Type   string
+	Symbol rune
+	Pos    [2]float64
+	Width  float64
+	Height float64
 }
 
-// UnitView is a read-only view of a unit for display/AI purposes.
+// ObjectiveView is a read-only view of an objective.
+type ObjectiveView struct {
+	ID            int
+	Position      [2]float64
+	Radius        float64
+	ControlledBy  int    // Player ID, -1 if uncontrolled
+	GhyraniteType string // Ghyranite subtype ("None", "Oakenbrow", etc.)
+	PairID        int    // Pair ID (0 = not paired)
+}
+
+// PairView is a read-only view of an objective pair (GH 2025-26).
+type PairView struct {
+	PairID       int    // Pair identifier
+	Type1        string // Ghyranite type of first objective in pair
+	Type2        string // Ghyranite type of second objective in pair
+	ControlledBy int    // Player who controls the pair, -1 if not controlled
+}
+
+// BattleTacticCardView is a read-only view of an available battle tactic card.
+type BattleTacticCardView struct {
+	CardID   int
+	CardName string
+	Tiers    [3]BattleTacticOptionView // Affray, Strike, Domination
+}
+
+// BattleTacticOptionView is a read-only view of a single tactic tier option.
+type BattleTacticOptionView struct {
+	Tier        string // "Affray", "Strike", "Domination"
+	Name        string
+	Description string
+	VP          int
+}
+
+// ActiveBattleTacticView is a read-only view of the currently selected battle tactic.
+type ActiveBattleTacticView struct {
+	CardName    string
+	TacticName  string
+	Tier        string
+	Description string
+	VP          int
+	Completed   bool
+}
+
+// BattleTacticHistoryView is a summary of completed/failed tactics.
+type BattleTacticHistoryView struct {
+	CompletedCount int
+	FailedCount    int
+	CompletedNames []string
+	FailedNames    []string
+}
+
+// BattleTacticsView is a read-only view of a player's battle tactic state.
+type BattleTacticsView struct {
+	AvailableCards []BattleTacticCardView   // Cards still available to pick
+	ActiveTactic   *ActiveBattleTacticView  // Currently selected (nil if none)
+	History        BattleTacticHistoryView  // Past results
+}
+
+// GameView provides a read-only snapshot of the game state.
+type GameView struct {
+	Units           map[int][]UnitView
+	Terrain         []TerrainView
+	Objectives      []ObjectiveView
+	Pairs           []PairView      // Objective pairs (GH 2025-26)
+	Territories     [2]TerritoryView // Deployment zones (empty if no battleplan)
+	BoardWidth      float64
+	BoardHeight     float64
+	CurrentPhase    phase.PhaseType
+	BattleRound     int
+	MaxBattleRounds int
+	ActivePlayer    int
+	BattleplanName  string      // Name of active battleplan ("" if none)
+	CommandPoints   map[int]int // CP remaining per player ID
+	VictoryPoints   map[int]int // VP per player ID
+	BattleTactics   map[int]*BattleTacticsView // playerID -> tactics view (GH 2025-26)
+}
+
+// TerritoryView is a read-only view of a deployment zone.
+type TerritoryView struct {
+	Name   string
+	MinPos [2]float64
+	MaxPos [2]float64
+}
+
+// UnitView is a read-only view of a unit.
 type UnitView struct {
 	ID            int
 	Name          string
 	OwnerID       int
-	Position      [2]float64 // X, Y
+	Position      [2]float64
 	AliveModels   int
 	TotalModels   int
 	CurrentWounds int
 	MaxWounds     int
 	MoveSpeed     int
 	Save          int
+	WardSave      int
 	Weapons       []WeaponView
+	StrikeOrder   core.StrikeOrder
 	HasMoved      bool
+	HasRun        bool
+	HasRetreated  bool
 	HasShot       bool
 	HasFought     bool
 	HasCharged    bool
+	HasPiledIn    bool
+	IsEngaged     bool
+	Spells        []SpellView
+	Prayers       []PrayerView
+	CanCast       bool
+	CanChant      bool
 }
 
 // WeaponView is a read-only view of a weapon.
 type WeaponView struct {
-	Name    string
-	Range   int
-	Attacks int
-	ToHit   int
-	ToWound int
-	Rend    int
-	Damage  int
+	Name      string
+	Range     int
+	Attacks   int
+	ToHit     int
+	ToWound   int
+	Rend      int
+	Damage    int
+	Abilities core.WeaponAbility
+}
+
+// SpellView is a read-only view of a spell.
+type SpellView struct {
+	Name         string
+	CastingValue int
+	Range        int
+}
+
+// PrayerView is a read-only view of a prayer.
+type PrayerView struct {
+	Name          string
+	ChantingValue int
+	Range         int
 }
 
 // AllowedCommands returns the command types valid for the current phase.
 func (v *GameView) AllowedCommands() []command.CommandType {
 	p := phase.Phase{Type: v.CurrentPhase}
-	// Rebuild allowed commands from phase type
 	for _, sp := range phase.StandardTurnSequence() {
 		if sp.Type == v.CurrentPhase {
 			p = sp

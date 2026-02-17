@@ -9,8 +9,8 @@ func newTestUnit() *Unit {
 		Stats: Stats{
 			Move:    5,
 			Save:    4,
-			Bravery: 7,
-			Wounds:  1,
+			Control: 1,
+			Health:  1,
 		},
 		Models: []Model{
 			{ID: 0, Position: Position{X: 10, Y: 10}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
@@ -18,7 +18,7 @@ func newTestUnit() *Unit {
 			{ID: 2, Position: Position{X: 11, Y: 10}, CurrentWounds: 1, MaxWounds: 1, IsAlive: true},
 		},
 		Weapons: []Weapon{
-			{Name: "Sword", Range: 0, Attacks: 2, ToHit: 3, ToWound: 3, Rend: -1, Damage: 1},
+			{Name: "Sword", Range: 0, Attacks: 2, ToHit: 3, ToWound: 3, Rend: 1, Damage: 1},
 			{Name: "Bow", Range: 18, Attacks: 1, ToHit: 4, ToWound: 4, Rend: 0, Damage: 1},
 		},
 		OwnerID: 1,
@@ -124,13 +124,15 @@ func TestUnit_AllocateDamage_MultiWound(t *testing.T) {
 func TestUnit_ResetPhaseFlags(t *testing.T) {
 	u := newTestUnit()
 	u.HasMoved = true
+	u.HasRun = true
+	u.HasRetreated = true
 	u.HasShot = true
 	u.HasFought = true
 	u.HasCharged = true
 
 	u.ResetPhaseFlags()
 
-	if u.HasMoved || u.HasShot || u.HasFought || u.HasCharged {
+	if u.HasMoved || u.HasRun || u.HasRetreated || u.HasShot || u.HasFought || u.HasCharged {
 		t.Error("all phase flags should be reset")
 	}
 }

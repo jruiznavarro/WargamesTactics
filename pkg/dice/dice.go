@@ -58,3 +58,43 @@ func (r *Roller) RollWithModifier(threshold, modifier int) (natural int, modifie
 	modified = natural + modifier
 	return natural, modified, modified >= threshold
 }
+
+// RerollType indicates the type of re-roll allowed.
+type RerollType int
+
+const (
+	RerollNone      RerollType = iota // No re-roll
+	RerollFailed                      // Re-roll failed dice
+	RerollAll                         // Re-roll all dice
+	RerollOnes                        // Re-roll results of 1
+)
+
+// RollD6WithReroll rolls a D6, optionally re-rolling once based on the RerollType.
+// AoS4 Rule 2.2 (Errata Jan 2026): A die cannot be re-rolled more than once.
+// Re-rolls happen before modifiers are applied.
+func (r *Roller) RollD6WithReroll(reroll RerollType, threshold int) int {
+	roll := r.RollD6()
+	switch reroll {
+	case RerollFailed:
+		if roll < threshold {
+			roll = r.RollD6()
+		}
+	case RerollAll:
+		roll = r.RollD6() // Always take second roll
+	case RerollOnes:
+		if roll == 1 {
+			roll = r.RollD6()
+		}
+	}
+	return roll
+}
+
+// Roll2D6WithReroll rolls 2D6 with optional re-roll of the full roll.
+// Re-roll happens before modifiers (Rule 2.2).
+func (r *Roller) Roll2D6WithReroll(reroll bool, threshold int) int {
+	total := r.Roll2D6()
+	if reroll && total < threshold {
+		total = r.Roll2D6()
+	}
+	return total
+}
