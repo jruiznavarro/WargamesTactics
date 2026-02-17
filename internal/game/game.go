@@ -166,6 +166,18 @@ func (g *Game) CreateUnit(name string, ownerID int, stats core.Stats, weapons []
 	return unit
 }
 
+// CreateUnitFromSpec creates a unit from an army.UnitSpec and applies warscroll attributes.
+// This is the primary way to create units from the data-driven army system.
+func (g *Game) CreateUnitFromSpec(name string, ownerID int, stats core.Stats, weapons []core.Weapon, numModels int, position core.Position, baseSize float64, keywords []core.Keyword, wardSave int, powerLevel int, spells []core.Spell, prayers []core.Prayer) *core.Unit {
+	u := g.CreateUnit(name, ownerID, stats, weapons, numModels, position, baseSize)
+	u.Keywords = keywords
+	u.WardSave = wardSave
+	u.PowerLevel = powerLevel
+	u.Spells = spells
+	u.Prayers = prayers
+	return u
+}
+
 // GetUnit returns a unit by ID, or nil if not found.
 func (g *Game) GetUnit(id core.UnitID) *core.Unit {
 	return g.Units[id]

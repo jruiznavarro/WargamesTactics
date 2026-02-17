@@ -8,6 +8,7 @@ import (
 
 	"github.com/jruiznavarro/wargamestactics/internal/ai"
 	"github.com/jruiznavarro/wargamestactics/internal/game"
+	"github.com/jruiznavarro/wargamestactics/internal/game/army"
 	"github.com/jruiznavarro/wargamestactics/internal/game/board"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/ui"
@@ -17,6 +18,9 @@ func main() {
 	mode := flag.String("mode", "pvai", "Game mode: pvp, pvai, aivai")
 	seed := flag.Int64("seed", 0, "RNG seed (0 = use current time)")
 	rounds := flag.Int("rounds", 5, "Maximum battle rounds")
+	dataDir := flag.String("data", "data/factions", "Path to faction data directory")
+	faction1 := flag.String("p1faction", "", "Player 1 faction (e.g. seraphon)")
+	faction2 := flag.String("p2faction", "", "Player 2 faction (e.g. tzeentch)")
 	flag.Parse()
 
 	if *seed == 0 {
@@ -26,7 +30,31 @@ func main() {
 	fmt.Println("=== AOS Battle Simulator ===")
 	fmt.Printf("Mode: %s | Seed: %d | Max Rounds: %d\n\n", *mode, *seed, *rounds)
 
-	g := game.NewGame(*seed, 48, 24)
+	// Load factions if data directory exists
+	registry := army.NewRegistry()
+	if _, err := os.Stat(*dataDir); err == nil {
+		if err := registry.LoadAllFactions(*dataDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not load factions: %v\n", err)
+		} else {
+			factionIDs := registry.FactionIDs()
+			if len(factionIDs) > 0 {
+				fmt.Printf("Loaded factions: %v\n", factionIDs)
+			}
+		}
+	}
+
+	// Use battleplan if factions are loaded
+	useFactions := *faction1 != "" && *faction2 != ""
+	var g *game.Game
+
+	if useFactions {
+		// Set up with a random battleplan and data-driven armies
+		bp := board.GetBattleplan(board.BattleplanTable1, 1) // Default battleplan
+		g = game.NewGameFromBattleplan(*seed, bp)
+		fmt.Printf("Battleplan: %s\n", bp.Name)
+	} else {
+		g = game.NewGame(*seed, 48, 24)
+	}
 
 	switch *mode {
 	case "pvp":
@@ -49,10 +77,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupExampleTerrain(g)
-	setupExampleArmies(g)
-	g.RegisterTerrainRules()
+	if useFactions {
+		f1 := registry.GetFaction(*faction1)
+		f2 := registry.GetFaction(*faction2)
+		if f1 == nil {
+			fmt.Fprintf(os.Stderr, "Unknown faction: %s\n", *faction1)
+			os.Exit(1)
+		}
+		if f2 == nil {
+			fmt.Fprintf(os.Stderr, "Unknown faction: %s\n", *faction2)
+			os.Exit(1)
+		}
+		setupFactionArmy(g, f1, 1)
+		setupFactionArmy(g, f2, 2)
+		fmt.Printf("P1: %s (%d pts) | P2: %s (%d pts)\n\n", f1.Name, armyPoints(f1, 1), f2.Name, armyPoints(f2, 2))
+	} else {
+		setupExampleTerrain(g)
+		setupExampleArmies(g)
+	}
 
+	g.RegisterTerrainRules()
 	g.RunGame(*rounds)
 
 	fmt.Println()
@@ -74,6 +118,91 @@ func main() {
 	} else {
 		fmt.Println("\n  DRAW: No winner after all battle rounds.")
 	}
+}
+
+// setupFactionArmy creates a sample army for a player from a faction.
+// Uses a selection of units up to ~1000 points for quick demonstration.
+func setupFactionArmy(g *game.Game, faction *army.Faction, ownerID int) {
+	// Deploy along P1 bottom or P2 top depending on owner
+	baseY := 6.0
+	if ownerID == 2 {
+		baseY = 38.0
+	}
+
+	pointsSpent := 0
+	pointsLimit := 1000
+	xPos := 10.0
+
+	// Pick 1 Hero first
+	for _, ws := range faction.Warscrolls {
+		if !ws.HasKeyword("Hero") || pointsSpent+ws.Points > pointsLimit {
+			continue
+		}
+		pos := core.Position{X: xPos, Y: baseY}
+		u := g.CreateUnitFromSpec(ws.Name, ownerID, ws.ToCoreStats(), ws.ToCoreWeapons(),
+			ws.UnitSize, pos, ws.BaseSizeInches(),
+			ws.ToCoreKeywords(), ws.WardSave, ws.PowerLevel,
+			ws.ToCoreSpells(), ws.ToCorePrayers())
+		applyAbilities(u, &ws)
+		pointsSpent += ws.Points
+		xPos += 8.0
+		break
+	}
+
+	// Fill with non-Hero units
+	for _, ws := range faction.Warscrolls {
+		if ws.HasKeyword("Hero") || pointsSpent+ws.Points > pointsLimit {
+			continue
+		}
+		if xPos > 55.0 {
+			break
+		}
+		pos := core.Position{X: xPos, Y: baseY}
+		u := g.CreateUnitFromSpec(ws.Name, ownerID, ws.ToCoreStats(), ws.ToCoreWeapons(),
+			ws.UnitSize, pos, ws.BaseSizeInches(),
+			ws.ToCoreKeywords(), ws.WardSave, ws.PowerLevel,
+			ws.ToCoreSpells(), ws.ToCorePrayers())
+		applyAbilities(u, &ws)
+		pointsSpent += ws.Points
+		xPos += 8.0
+	}
+}
+
+func applyAbilities(u *core.Unit, ws *army.Warscroll) {
+	for _, ab := range ws.Abilities {
+		switch ab.Effect {
+		case "ward":
+			if ab.Value > 0 && (u.WardSave == 0 || ab.Value < u.WardSave) {
+				u.WardSave = ab.Value
+			}
+		case "strikeFirst":
+			u.StrikeOrder = core.StrikeFirst
+		case "strikeLast":
+			u.StrikeOrder = core.StrikeLast
+		}
+	}
+}
+
+func armyPoints(faction *army.Faction, _ int) int {
+	// Estimate for display (simplified - same as setupFactionArmy logic)
+	pointsSpent := 0
+	pointsLimit := 1000
+	heroTaken := false
+	count := 0
+
+	for _, ws := range faction.Warscrolls {
+		if ws.HasKeyword("Hero") && !heroTaken && pointsSpent+ws.Points <= pointsLimit {
+			pointsSpent += ws.Points
+			heroTaken = true
+			count++
+			continue
+		}
+		if !ws.HasKeyword("Hero") && pointsSpent+ws.Points <= pointsLimit && count < 7 {
+			pointsSpent += ws.Points
+			count++
+		}
+	}
+	return pointsSpent
 }
 
 func setupExampleTerrain(g *game.Game) {
