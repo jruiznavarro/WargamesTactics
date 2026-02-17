@@ -3,6 +3,7 @@ package game
 import (
 	"testing"
 
+	"github.com/jruiznavarro/wargamestactics/internal/game/board"
 	"github.com/jruiznavarro/wargamestactics/internal/game/command"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/game/phase"
@@ -689,5 +690,290 @@ func TestObjectiveControl_UnitContestsOnlyOne_EvenIfOverlapping(t *testing.T) {
 	}
 	if g.ObjectiveControl[2] != -1 {
 		t.Errorf("expected objective 2 to be uncontrolled (unit contests only nearest), got controller %d", g.ObjectiveControl[2])
+	}
+}
+
+// --- Ghyranite Objective Scoring Tests (GH 2025-26) ---
+
+func setupGhyraniteGame(seed int64) *Game {
+	bp := board.GetBattleplan(board.BattleplanTable1, 1) // "Passing Seasons"
+	g := NewGameFromBattleplan(seed, bp)
+	p1 := &stubPlayer{id: 1, name: "P1"}
+	p2 := &stubPlayer{id: 2, name: "P2"}
+	g.AddPlayer(p1)
+	g.AddPlayer(p2)
+	g.Commands.InitRound([]int{1, 2}, 4, -1)
+	g.CurrentPhase = phase.PhaseEndOfTurn
+	return g
+}
+
+func TestGhyranite_BattleplanSetup(t *testing.T) {
+	bp := board.GetBattleplan(board.BattleplanTable1, 1)
+	if bp == nil {
+		t.Fatal("expected battleplan Table 1 Roll 1 to exist")
+	}
+	if bp.Name != "Passing Seasons" {
+		t.Errorf("expected 'Passing Seasons', got '%s'", bp.Name)
+	}
+
+	b := bp.SetupBoard()
+	if len(b.Objectives) != 6 {
+		t.Errorf("expected 6 objectives, got %d", len(b.Objectives))
+	}
+
+	// Verify Ghyranite types
+	typeCount := make(map[board.GhyraniteType]int)
+	for _, o := range b.Objectives {
+		typeCount[o.GhyraniteType]++
+	}
+	if typeCount[board.GhyraniteOakenbrow] != 2 {
+		t.Errorf("expected 2 Oakenbrow objectives, got %d", typeCount[board.GhyraniteOakenbrow])
+	}
+	if typeCount[board.GhyraniteGnarlroot] != 2 {
+		t.Errorf("expected 2 Gnarlroot objectives, got %d", typeCount[board.GhyraniteGnarlroot])
+	}
+	if typeCount[board.GhyraniteWinterleaf] != 1 {
+		t.Errorf("expected 1 Winterleaf objective, got %d", typeCount[board.GhyraniteWinterleaf])
+	}
+	if typeCount[board.GhyraniteHeartwood] != 1 {
+		t.Errorf("expected 1 Heartwood objective, got %d", typeCount[board.GhyraniteHeartwood])
+	}
+
+	// Verify pair IDs
+	pairIDs := b.PairIDs()
+	if len(pairIDs) != 3 {
+		t.Errorf("expected 3 pairs, got %d", len(pairIDs))
+	}
+}
+
+func TestGhyranite_PairControl_BothControlled(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// "Passing Seasons" objectives:
+	// Oakenbrow pair (ID 1): (10,10) and (50,34)
+	// Place P1 units on both Oakenbrow objectives
+	g.CreateUnit("P1 Left", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("P1 Right", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)
+
+	// P2 far away
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 3, core.Position{X: 30, Y: 22}, 1.0)
+
+	g.CalculateGhyraniteObjectiveControl()
+
+	// P1 should control the Oakenbrow pair (PairID 1)
+	if g.PairControl[1] != 1 {
+		t.Errorf("expected P1 to control Oakenbrow pair, got controller %d", g.PairControl[1])
+	}
+	if g.PairsControlledBy(1) < 1 {
+		t.Errorf("expected P1 to control at least 1 pair, got %d", g.PairsControlledBy(1))
+	}
+}
+
+func TestGhyranite_PairControl_OnlyOneControlled(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// P1 only controls ONE Oakenbrow objective, not both
+	g.CreateUnit("P1 Left", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)
+
+	// P2 controls the OTHER Oakenbrow objective
+	g.CreateUnit("P2 Right", 2,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)
+
+	g.CalculateGhyraniteObjectiveControl()
+
+	// Neither controls the pair (split control)
+	if g.PairControl[1] != -1 {
+		t.Errorf("expected no one to control Oakenbrow pair (split), got controller %d", g.PairControl[1])
+	}
+}
+
+func TestGhyranite_ScorePairs_TwoPairsControlled(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// Objectives for "Passing Seasons":
+	// Pair 1 (Oakenbrow): (10,10), (50,34)
+	// Pair 2 (Gnarlroot): (50,10), (10,34)
+	// Pair 3 (Winterleaf+Heartwood): (20,22), (40,22)
+
+	// P1 controls both Oakenbrow (pair 1) and both Gnarlroot (pair 2)
+	g.CreateUnit("P1 A", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("P1 B", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)
+	g.CreateUnit("P1 C", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 10}, 1.0)
+	g.CreateUnit("P1 D", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 34}, 1.0)
+
+	// P2 far away
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 3, core.Position{X: 30, Y: 0}, 1.0)
+
+	scored := g.ScoreGhyraniteEndOfTurn(1)
+
+	// 2 pairs * 2 VP = 4 VP + 1 VP for majority (2 out of 3) = 5 VP
+	if scored != 5 {
+		t.Errorf("expected 5 VP (2 pairs × 2 VP + 1 majority), got %d", scored)
+	}
+}
+
+func TestGhyranite_ScorePairs_NoPairsControlled(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// P1 controls only 1 objective from each pair (never completes a pair)
+	g.CreateUnit("P1 A", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)   // One Oakenbrow
+	g.CreateUnit("P2 A", 2,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)   // Other Oakenbrow
+
+	g.CreateUnit("P1 B", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 10}, 1.0)   // One Gnarlroot
+	g.CreateUnit("P2 B", 2,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 34}, 1.0)   // Other Gnarlroot
+
+	scored := g.ScoreGhyraniteEndOfTurn(1)
+
+	// No complete pairs = 0 VP
+	if scored != 0 {
+		t.Errorf("expected 0 VP (no complete pairs), got %d", scored)
+	}
+}
+
+func TestGhyranite_ScoreEndOfTurnAuto_UsesBattleplanScoring(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// P1 controls both Oakenbrow objectives (pair 1)
+	g.CreateUnit("P1 A", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("P1 B", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 3, core.Position{X: 30, Y: 0}, 1.0)
+
+	scored := g.ScoreEndOfTurnAuto(1)
+
+	// With battleplan active, should use Ghyranite scoring
+	// 1 pair * 2 VP = 2 VP (no majority: 1 out of 3)
+	if scored != 2 {
+		t.Errorf("expected 2 VP (1 pair × 2 VP, no majority), got %d", scored)
+	}
+}
+
+func TestGhyranite_ScoreEndOfTurnAuto_FallsBackToStandard(t *testing.T) {
+	g := setupScoringGame(1) // No battleplan
+
+	g.Board.AddObjective(core.Position{X: 12, Y: 12}, 6.0)
+	g.CreateUnit("P1 Warriors", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 12, Y: 12}, 1.0)
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 3, core.Position{X: 45, Y: 12}, 1.0)
+
+	scored := g.ScoreEndOfTurnAuto(1)
+
+	// Without battleplan, uses standard scoring: +1 for >= 1 obj, +1 for more than opponent = 2
+	if scored != 2 {
+		t.Errorf("expected 2 VP (standard scoring: 1 obj + more than opponent), got %d", scored)
+	}
+}
+
+func TestGhyranite_MajorityRequiresStrictMajority(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// P1 controls 1 pair out of 3 = NOT a majority
+	g.CreateUnit("P1 A", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("P1 B", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 3, core.Position{X: 30, Y: 0}, 1.0)
+
+	scored := g.ScoreGhyraniteEndOfTurn(1)
+
+	// 1 pair × 2 VP = 2 VP, but 1/3 is NOT majority so no bonus
+	if scored != 2 {
+		t.Errorf("expected 2 VP (1 pair, no majority bonus for 1/3), got %d", scored)
+	}
+}
+
+func TestGhyranite_AllPairsControlled_MaxScore(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// P1 controls ALL 6 objectives (all 3 pairs)
+	g.CreateUnit("P1 A", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)   // Oakenbrow 1
+	g.CreateUnit("P1 B", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)   // Oakenbrow 2
+	g.CreateUnit("P1 C", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 10}, 1.0)   // Gnarlroot 1
+	g.CreateUnit("P1 D", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 34}, 1.0)   // Gnarlroot 2
+	g.CreateUnit("P1 E", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 20, Y: 22}, 1.0)   // Winterleaf
+	g.CreateUnit("P1 F", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 40, Y: 22}, 1.0)   // Heartwood
+
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 3, core.Position{X: 30, Y: 0}, 1.0)
+
+	scored := g.ScoreGhyraniteEndOfTurn(1)
+
+	// 3 pairs × 2 VP = 6 VP + 1 VP majority = 7 VP
+	if scored != 7 {
+		t.Errorf("expected 7 VP (3 pairs × 2 VP + 1 majority), got %d", scored)
+	}
+}
+
+func TestGhyranite_VPAccumulates(t *testing.T) {
+	g := setupGhyraniteGame(1)
+
+	// P1 controls both Oakenbrow objectives
+	g.CreateUnit("P1 A", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 10, Y: 10}, 1.0)
+	g.CreateUnit("P1 B", 1,
+		core.Stats{Move: 5, Save: 4, Control: 2, Health: 1},
+		nil, 5, core.Position{X: 50, Y: 34}, 1.0)
+	g.CreateUnit("P2 Far", 2,
+		core.Stats{Move: 5, Save: 4, Control: 1, Health: 1},
+		nil, 3, core.Position{X: 30, Y: 0}, 1.0)
+
+	g.ScoreGhyraniteEndOfTurn(1) // +2 VP
+	g.ScoreGhyraniteEndOfTurn(1) // +2 VP
+
+	if g.VictoryPoints[1] != 4 {
+		t.Errorf("expected VP to accumulate to 4, got %d", g.VictoryPoints[1])
 	}
 }

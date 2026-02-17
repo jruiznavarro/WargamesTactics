@@ -25,10 +25,20 @@ type TerrainView struct {
 
 // ObjectiveView is a read-only view of an objective.
 type ObjectiveView struct {
-	ID           int
-	Position     [2]float64
-	Radius       float64
-	ControlledBy int // Player ID, -1 if uncontrolled
+	ID            int
+	Position      [2]float64
+	Radius        float64
+	ControlledBy  int    // Player ID, -1 if uncontrolled
+	GhyraniteType string // Ghyranite subtype ("None", "Oakenbrow", etc.)
+	PairID        int    // Pair ID (0 = not paired)
+}
+
+// PairView is a read-only view of an objective pair (GH 2025-26).
+type PairView struct {
+	PairID       int    // Pair identifier
+	Type1        string // Ghyranite type of first objective in pair
+	Type2        string // Ghyranite type of second objective in pair
+	ControlledBy int    // Player who controls the pair, -1 if not controlled
 }
 
 // GameView provides a read-only snapshot of the game state.
@@ -36,14 +46,24 @@ type GameView struct {
 	Units           map[int][]UnitView
 	Terrain         []TerrainView
 	Objectives      []ObjectiveView
+	Pairs           []PairView      // Objective pairs (GH 2025-26)
+	Territories     [2]TerritoryView // Deployment zones (empty if no battleplan)
 	BoardWidth      float64
 	BoardHeight     float64
 	CurrentPhase    phase.PhaseType
 	BattleRound     int
 	MaxBattleRounds int
 	ActivePlayer    int
+	BattleplanName  string      // Name of active battleplan ("" if none)
 	CommandPoints   map[int]int // CP remaining per player ID
 	VictoryPoints   map[int]int // VP per player ID
+}
+
+// TerritoryView is a read-only view of a deployment zone.
+type TerritoryView struct {
+	Name   string
+	MinPos [2]float64
+	MaxPos [2]float64
 }
 
 // UnitView is a read-only view of a unit.

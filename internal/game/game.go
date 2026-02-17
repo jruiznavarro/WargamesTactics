@@ -39,6 +39,11 @@ type Game struct {
 
 	// Per-turn magic tracking: spell names cast this turn per player (same spell once per turn unless Unlimited)
 	SpellsCastThisTurn map[int]map[string]bool // playerID -> spell name -> cast
+
+	// GH 2025-26: Battleplan configuration
+	Battleplan *board.Battleplan // Active battleplan (nil = standard scoring)
+	// Pair control: which player controls each objective pair (pairID -> playerID, -1 = uncontrolled)
+	PairControl map[int]int
 }
 
 // NewGame creates a new game with the given seed and board dimensions.
@@ -55,7 +60,52 @@ func NewGame(seed int64, boardWidth, boardHeight float64) *Game {
 		VictoryPoints:      make(map[int]int),
 		ObjectiveControl:   make(map[int]int),
 		SpellsCastThisTurn: make(map[int]map[string]bool),
+		PairControl:        make(map[int]int),
 	}
+}
+
+// NewGameFromBattleplan creates a game configured with a specific battleplan (GH 2025-26).
+// The board is set up with the battleplan's dimensions and Ghyranite objectives.
+func NewGameFromBattleplan(seed int64, bp *board.Battleplan) *Game {
+	g := &Game{
+		Board:              bp.SetupBoard(),
+		Units:              make(map[core.UnitID]*core.Unit),
+		Roller:             dice.NewRoller(seed),
+		Rules:              rules.NewEngine(),
+		Commands:           commands.NewCommandTracker(),
+		NextUnitID:         1,
+		Winner:             -1,
+		MaxBattleRounds:    5,
+		VictoryPoints:      make(map[int]int),
+		ObjectiveControl:   make(map[int]int),
+		SpellsCastThisTurn: make(map[int]map[string]bool),
+		PairControl:        make(map[int]int),
+		Battleplan:         bp,
+	}
+	return g
+}
+
+// SetBattleplan applies a battleplan to an existing game, replacing the board.
+func (g *Game) SetBattleplan(bp *board.Battleplan) {
+	g.Battleplan = bp
+	g.Board = bp.SetupBoard()
+	g.ObjectiveControl = make(map[int]int)
+	g.PairControl = make(map[int]int)
+}
+
+// RandomBattleplan selects a random battleplan by rolling on both tables.
+func (g *Game) RandomBattleplan() *board.Battleplan {
+	tableRoll := g.Roller.RollD6()
+	var table board.BattleplanTable
+	if tableRoll <= 3 {
+		table = board.BattleplanTable1
+	} else {
+		table = board.BattleplanTable2
+	}
+	planRoll := g.Roller.RollD6()
+	bp := board.GetBattleplan(table, planRoll)
+	g.Logf("Battleplan roll: Table %d (roll %d), Plan %d → %s", table, tableRoll, planRoll, bp.Name)
+	return bp
 }
 
 // AddPlayer adds a player to the game. Returns the player index.
@@ -215,11 +265,46 @@ func (g *Game) View(playerID int) *GameView {
 			controlledBy = pid
 		}
 		objectiveViews = append(objectiveViews, ObjectiveView{
-			ID:           o.ID,
-			Position:     [2]float64{o.Position.X, o.Position.Y},
-			Radius:       o.Radius,
-			ControlledBy: controlledBy,
+			ID:            o.ID,
+			Position:      [2]float64{o.Position.X, o.Position.Y},
+			Radius:        o.Radius,
+			ControlledBy:  controlledBy,
+			GhyraniteType: o.GhyraniteType.String(),
+			PairID:        o.PairID,
 		})
+	}
+
+	// Build pair views
+	var pairViews []PairView
+	for _, pairID := range g.Board.PairIDs() {
+		pair := g.Board.ObjectivePair(pairID)
+		pv := PairView{
+			PairID:       pairID,
+			ControlledBy: -1,
+		}
+		if len(pair) >= 1 {
+			pv.Type1 = pair[0].GhyraniteType.String()
+		}
+		if len(pair) >= 2 {
+			pv.Type2 = pair[1].GhyraniteType.String()
+		}
+		if pid, ok := g.PairControl[pairID]; ok {
+			pv.ControlledBy = pid
+		}
+		pairViews = append(pairViews, pv)
+	}
+
+	// Build territory views
+	var territoryViews [2]TerritoryView
+	if g.Battleplan != nil {
+		for i := 0; i < 2; i++ {
+			t := g.Battleplan.Territories[i]
+			territoryViews[i] = TerritoryView{
+				Name:   t.Name,
+				MinPos: [2]float64{t.MinPos.X, t.MinPos.Y},
+				MaxPos: [2]float64{t.MaxPos.X, t.MaxPos.Y},
+			}
+		}
 	}
 
 	cpMap := make(map[int]int)
@@ -231,16 +316,24 @@ func (g *Game) View(playerID int) *GameView {
 		vpMap[p.ID()] = g.VictoryPoints[p.ID()]
 	}
 
+	bpName := ""
+	if g.Battleplan != nil {
+		bpName = g.Battleplan.Name
+	}
+
 	return &GameView{
 		Units:           unitsByOwner,
 		Terrain:         terrainViews,
 		Objectives:      objectiveViews,
+		Pairs:           pairViews,
+		Territories:     territoryViews,
 		BoardWidth:      g.Board.Width,
 		BoardHeight:     g.Board.Height,
 		CurrentPhase:    g.CurrentPhase,
 		BattleRound:     g.BattleRound,
 		MaxBattleRounds: g.MaxBattleRounds,
 		ActivePlayer:    g.ActivePlayer,
+		BattleplanName:  bpName,
 		CommandPoints:   cpMap,
 		VictoryPoints:   vpMap,
 	}
@@ -822,6 +915,139 @@ func (g *Game) ScoreEndOfTurn(playerID int) int {
 	g.VictoryPoints[playerID] += scored
 	g.Logf("  %s scored %d VP this turn (total: %d)", g.playerName(playerID), scored, g.VictoryPoints[playerID])
 	return scored
+}
+
+// CalculateGhyraniteObjectiveControl updates objective control using per-model contesting
+// for Ghyranite objectives, then calculates pair control.
+// GH 2025-26 Season Rules: Ghyranite objectives are contested per-model.
+func (g *Game) CalculateGhyraniteObjectiveControl() {
+	// Step 1: Assign each unit to its nearest contested Ghyranite objective
+	unitObjective := make(map[core.UnitID]int) // unitID -> objectiveID
+	for _, u := range g.Units {
+		if u.IsDestroyed() {
+			continue
+		}
+		bestObjID := -1
+		bestDist := math.MaxFloat64
+		for _, obj := range g.Board.Objectives {
+			// Per-model contesting: check if any model in the unit is within range
+			if obj.IsContestedByModel(u.Models) {
+				d := core.Distance(u.Position(), obj.Position)
+				if d < bestDist {
+					bestDist = d
+					bestObjID = obj.ID
+				}
+			}
+		}
+		if bestObjID >= 0 {
+			unitObjective[u.ID] = bestObjID
+		}
+	}
+
+	// Step 2: Calculate control per objective
+	for _, obj := range g.Board.Objectives {
+		type playerScore struct {
+			controlScore int
+			modelCount   int
+		}
+		scores := make(map[int]*playerScore)
+
+		for _, u := range g.Units {
+			if u.IsDestroyed() {
+				continue
+			}
+			assignedObj, ok := unitObjective[u.ID]
+			if !ok || assignedObj != obj.ID {
+				continue
+			}
+			if scores[u.OwnerID] == nil {
+				scores[u.OwnerID] = &playerScore{}
+			}
+			alive := u.AliveModels()
+			scores[u.OwnerID].controlScore += alive * u.Stats.Control
+			scores[u.OwnerID].modelCount += alive
+		}
+
+		bestPlayer := -1
+		bestControl := 0
+		bestModels := 0
+		for pid, s := range scores {
+			if s.controlScore > bestControl ||
+				(s.controlScore == bestControl && s.modelCount > bestModels) {
+				bestPlayer = pid
+				bestControl = s.controlScore
+				bestModels = s.modelCount
+			}
+		}
+		g.ObjectiveControl[obj.ID] = bestPlayer
+	}
+
+	// Step 3: Calculate pair control
+	for _, pairID := range g.Board.PairIDs() {
+		pair := g.Board.ObjectivePair(pairID)
+		if len(pair) != 2 {
+			g.PairControl[pairID] = -1
+			continue
+		}
+
+		ctrl0 := g.ObjectiveControl[pair[0].ID]
+		ctrl1 := g.ObjectiveControl[pair[1].ID]
+
+		// A player controls a pair only if they control BOTH objectives
+		if ctrl0 >= 0 && ctrl0 == ctrl1 {
+			g.PairControl[pairID] = ctrl0
+		} else {
+			g.PairControl[pairID] = -1
+		}
+	}
+}
+
+// PairsControlledBy returns the number of objective pairs controlled by a player.
+func (g *Game) PairsControlledBy(playerID int) int {
+	count := 0
+	for _, controllerID := range g.PairControl {
+		if controllerID == playerID {
+			count++
+		}
+	}
+	return count
+}
+
+// ScoreGhyraniteEndOfTurn awards VP using the Ghyranite paired scoring system (GH 2025-26).
+// +2 VP for each controlled pair, +1 VP for controlling the majority of pairs.
+func (g *Game) ScoreGhyraniteEndOfTurn(playerID int) int {
+	g.CalculateGhyraniteObjectiveControl()
+
+	scored := 0
+	myPairs := g.PairsControlledBy(playerID)
+	totalPairs := len(g.Board.PairIDs())
+
+	// +2 VP per controlled pair
+	pairVP := myPairs * 2
+	scored += pairVP
+	if pairVP > 0 {
+		g.Logf("  +%d VP: %s controls %d objective pair(s) (%d VP each)",
+			pairVP, g.playerName(playerID), myPairs, 2)
+	}
+
+	// +1 VP for controlling the majority of pairs
+	if totalPairs > 0 && myPairs*2 > totalPairs {
+		scored++
+		g.Logf("  +1 VP: %s controls majority of pairs (%d/%d)",
+			g.playerName(playerID), myPairs, totalPairs)
+	}
+
+	g.VictoryPoints[playerID] += scored
+	g.Logf("  %s scored %d VP this turn (total: %d)", g.playerName(playerID), scored, g.VictoryPoints[playerID])
+	return scored
+}
+
+// ScoreEndOfTurnAuto selects the appropriate scoring method based on whether a battleplan is active.
+func (g *Game) ScoreEndOfTurnAuto(playerID int) int {
+	if g.Battleplan != nil {
+		return g.ScoreGhyraniteEndOfTurn(playerID)
+	}
+	return g.ScoreEndOfTurn(playerID)
 }
 
 // CheckFinalVictory determines the winner after all battle rounds are complete.

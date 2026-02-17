@@ -70,6 +70,55 @@ func (b *Board) AddObjective(pos core.Position, radius float64) *Objective {
 	return o
 }
 
+// AddGhyraniteObjective adds a Ghyranite objective (GH 2025-26) with subtype and pair ID.
+// Standard control zone is 3" for Ghyranite objectives.
+func (b *Board) AddGhyraniteObjective(pos core.Position, ghyraniteType GhyraniteType, pairID int) *Objective {
+	o := &Objective{
+		ID:            len(b.Objectives) + 1,
+		Position:      pos,
+		Radius:        3.0, // GH 2025-26: 40mm base, 3" control zone
+		GhyraniteType: ghyraniteType,
+		PairID:        pairID,
+	}
+	b.Objectives = append(b.Objectives, o)
+	return o
+}
+
+// GhyraniteObjectives returns all Ghyranite objectives on the board.
+func (b *Board) GhyraniteObjectives() []*Objective {
+	var result []*Objective
+	for _, o := range b.Objectives {
+		if o.IsGhyranite() {
+			result = append(result, o)
+		}
+	}
+	return result
+}
+
+// ObjectivePair returns both objectives belonging to a given pair ID, or nil if not found.
+func (b *Board) ObjectivePair(pairID int) []*Objective {
+	var result []*Objective
+	for _, o := range b.Objectives {
+		if o.PairID == pairID {
+			result = append(result, o)
+		}
+	}
+	return result
+}
+
+// PairIDs returns all unique pair IDs present on the board.
+func (b *Board) PairIDs() []int {
+	seen := make(map[int]bool)
+	var ids []int
+	for _, o := range b.Objectives {
+		if o.PairID > 0 && !seen[o.PairID] {
+			seen[o.PairID] = true
+			ids = append(ids, o.PairID)
+		}
+	}
+	return ids
+}
+
 // IsVisible checks if two positions have line of sight to each other.
 // AoS4 Rule 6.0 / 7.0 (Errata Jan 2026): visibility requires no impassable terrain
 // directly between the two positions. Simplified LOS check.
