@@ -26,6 +26,11 @@ type Context struct {
 	Destination core.Position // Intended destination
 	Distance    float64       // Distance being moved/charged
 
+	// Game state for faction rules
+	BattleRound int            // Current battle round number
+	AllUnits    []*core.Unit   // All alive units in the game (for proximity checks)
+	PlayerID    int            // Player whose turn it is
+
 	// Modifier accumulator -- rules write their modifiers here.
 	Modifiers Modifiers
 
@@ -34,6 +39,9 @@ type Context struct {
 	RerollHit   dice.RerollType // Re-roll type for hit rolls
 	RerollWound dice.RerollType // Re-roll type for wound rolls
 	RerollSave  dice.RerollType // Re-roll type for save rolls
+
+	// Ward override (for dynamic ward effects from faction rules)
+	WardOverride int // If > 0, overrides the unit's base ward save (lower = better)
 
 	// Control flags -- rules can set these to block an action.
 	Blocked      bool   // If true, the action is prevented

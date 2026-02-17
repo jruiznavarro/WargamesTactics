@@ -90,6 +90,21 @@ func main() {
 		}
 		setupFactionArmy(g, f1, 1)
 		setupFactionArmy(g, f2, 2)
+
+		// Register faction battle trait rules
+		army.RegisterFactionRules(g.Rules, f1, 1)
+		army.RegisterFactionRules(g.Rules, f2, 2)
+
+		// Register battle formation rules (use first formation by default)
+		if len(f1.Formations) > 0 {
+			army.RegisterFormationRules(g.Rules, f1, 0, 1)
+			fmt.Printf("P1 Formation: %s\n", f1.Formations[0].Name)
+		}
+		if len(f2.Formations) > 0 {
+			army.RegisterFormationRules(g.Rules, f2, 0, 2)
+			fmt.Printf("P2 Formation: %s\n", f2.Formations[0].Name)
+		}
+
 		fmt.Printf("P1: %s (%d pts) | P2: %s (%d pts)\n\n", f1.Name, armyPoints(f1, 1), f2.Name, armyPoints(f2, 2))
 	} else {
 		setupExampleTerrain(g)
@@ -132,6 +147,7 @@ func setupFactionArmy(g *game.Game, faction *army.Faction, ownerID int) {
 	pointsSpent := 0
 	pointsLimit := 1000
 	xPos := 10.0
+	isFirstHero := true
 
 	// Pick 1 Hero first
 	for _, ws := range faction.Warscrolls {
@@ -144,6 +160,14 @@ func setupFactionArmy(g *game.Game, faction *army.Faction, ownerID int) {
 			ws.ToCoreKeywords(), ws.WardSave, ws.PowerLevel,
 			ws.ToCoreSpells(), ws.ToCorePrayers())
 		applyAbilities(u, &ws)
+		u.FactionKeyword = faction.ID
+		u.Tags = append([]string{}, ws.Tags...)
+		if isFirstHero {
+			u.IsGeneral = true
+			isFirstHero = false
+		}
+		// Register warscroll ability rules
+		army.RegisterWarscrollAbilityRules(g.Rules, u, &ws)
 		pointsSpent += ws.Points
 		xPos += 8.0
 		break
@@ -163,6 +187,10 @@ func setupFactionArmy(g *game.Game, faction *army.Faction, ownerID int) {
 			ws.ToCoreKeywords(), ws.WardSave, ws.PowerLevel,
 			ws.ToCoreSpells(), ws.ToCorePrayers())
 		applyAbilities(u, &ws)
+		u.FactionKeyword = faction.ID
+		u.Tags = append([]string{}, ws.Tags...)
+		// Register warscroll ability rules
+		army.RegisterWarscrollAbilityRules(g.Rules, u, &ws)
 		pointsSpent += ws.Points
 		xPos += 8.0
 	}

@@ -4,10 +4,13 @@ package rules
 type Source int
 
 const (
-	SourceTerrain     Source = iota // Rule from terrain feature
-	SourceUnitAbility              // Rule from a unit's innate ability
-	SourceWeapon                   // Rule from a weapon profile
-	SourceGlobal                   // Global game rule
+	SourceTerrain      Source = iota // Rule from terrain feature
+	SourceUnitAbility               // Rule from a unit's innate ability
+	SourceWeapon                    // Rule from a weapon profile
+	SourceGlobal                    // Global game rule
+	SourceFaction                   // Rule from faction battle trait
+	SourceFormation                 // Rule from battle formation
+	SourceEnhancement               // Rule from enhancement (artefact/heroic trait)
 )
 
 // Rule defines a single game rule that hooks into the engine.

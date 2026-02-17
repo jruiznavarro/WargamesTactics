@@ -2,13 +2,16 @@ package army
 
 // Faction represents a complete army faction with its warscrolls and rules.
 type Faction struct {
-	ID           string            `json:"id"`           // Faction key (e.g. "seraphon")
-	Name         string            `json:"name"`         // Display name (e.g. "Seraphon")
-	GrandAlliance string           `json:"grandAlliance"` // "Order", "Chaos", "Death", "Destruction"
-	Warscrolls   []Warscroll       `json:"warscrolls"`   // All available unit warscrolls
-	BattleTraits []FactionTrait    `json:"battleTraits"`  // Faction battle traits
-	SpellLore    []WarscrollSpell  `json:"spellLore"`     // Faction spell lore (available to all wizards)
-	PrayerLore   []WarscrollPrayer `json:"prayerLore"`    // Faction prayer lore (available to all priests)
+	ID            string             `json:"id"`            // Faction key (e.g. "seraphon")
+	Name          string             `json:"name"`          // Display name (e.g. "Seraphon")
+	GrandAlliance string             `json:"grandAlliance"` // "Order", "Chaos", "Death", "Destruction"
+	Warscrolls    []Warscroll        `json:"warscrolls"`    // All available unit warscrolls
+	BattleTraits  []FactionTrait     `json:"battleTraits"`  // Faction battle traits
+	SpellLore     []WarscrollSpell   `json:"spellLore"`     // Faction spell lore (available to all wizards)
+	PrayerLore    []WarscrollPrayer  `json:"prayerLore"`    // Faction prayer lore (available to all priests)
+	Formations    []BattleFormation  `json:"formations"`    // Selectable battle formations
+	HeroicTraits  []Enhancement      `json:"heroicTraits"`  // Faction heroic traits (1 for general)
+	Artefacts     []Enhancement      `json:"artefacts"`     // Faction artefacts (1 per army, non-unique hero)
 }
 
 // FactionTrait represents a faction-wide special rule.

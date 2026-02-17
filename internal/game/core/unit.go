@@ -36,9 +36,12 @@ type Unit struct {
 	Weapons []Weapon
 	OwnerID int // Player ID of the owner
 
-	Keywords    []Keyword   // Unit keywords (Infantry, Hero, Fly, etc.)
-	WardSave    int         // Ward save value (0 = none, 6 = 6+, 5 = 5+)
-	StrikeOrder StrikeOrder // Determines combat activation priority
+	Keywords       []Keyword   // Unit keywords (Infantry, Hero, Fly, etc.)
+	FactionKeyword string      // Faction allegiance keyword (e.g. "Seraphon", "Tzeentch")
+	Tags           []string    // Faction sub-keywords (e.g. "Saurus", "Skink", "Daemon")
+	WardSave       int         // Ward save value (0 = none, 6 = 6+, 5 = 5+)
+	StrikeOrder    StrikeOrder // Determines combat activation priority
+	IsGeneral      bool        // True if this unit is the army general
 
 	// Magic (AoS4 Rule 19.0 / 19.2)
 	Spells       []Spell  // Known spells (warscroll/faction specific)
@@ -130,6 +133,16 @@ func (u *Unit) RangedWeapons() []int {
 func (u *Unit) HasKeyword(k Keyword) bool {
 	for _, kw := range u.Keywords {
 		if kw == k {
+			return true
+		}
+	}
+	return false
+}
+
+// HasTag returns true if the unit has the given faction sub-keyword tag.
+func (u *Unit) HasTag(tag string) bool {
+	for _, t := range u.Tags {
+		if t == tag {
 			return true
 		}
 	}

@@ -5,17 +5,17 @@
   "battleTraits": [
     {
       "name": "Masters of Destiny",
-      "description": "At the start of the battle, roll 9 dice and keep them as Destiny Dice. These can replace any dice roll during the game.",
+      "description": "At the start of the battle, roll 9 dice and keep them as Destiny Dice. You can substitute any dice roll with a Destiny Die showing a value of your choice from the pool.",
       "phase": "passive",
       "effect": "destinyDice",
       "value": 9
     },
     {
       "name": "Locus of Change",
-      "description": "Tzeentch Daemon units have Ward 6+ while wholly within 12\" of a Tzeentch Hero.",
+      "description": "Subtract 1 from wound rolls for attacks that target friendly TZEENTCH DAEMON units wholly within 9\" of a friendly TZEENTCH HERO.",
       "phase": "passive",
-      "effect": "conditionalWard",
-      "value": 6
+      "effect": "locusWoundPenalty",
+      "value": 9
     }
   ],
   "spellLore": [
@@ -48,15 +48,104 @@
     }
   ],
   "prayerLore": [],
+  "formations": [
+    {
+      "name": "Arcanite Cabal",
+      "description": "Friendly ARCANITE units wholly within 12\" of a friendly TZEENTCH HERO can add 1 to hit rolls for ranged attacks.",
+      "effects": [
+        {
+          "description": "+1 to hit for Arcanite units near a hero (ranged)",
+          "targetTag": "Arcanite",
+          "effect": "hitBonusNearHero",
+          "value": 1,
+          "condition": "nearHero"
+        }
+      ]
+    },
+    {
+      "name": "Wyrdflame Host",
+      "description": "Friendly FLAMER units have +1 Rend on their ranged weapons.",
+      "effects": [
+        {
+          "description": "+1 Rend for Flamer ranged weapons",
+          "targetTag": "Flamer",
+          "effect": "rendBonus",
+          "value": 1,
+          "condition": "always"
+        }
+      ]
+    },
+    {
+      "name": "Omniscient Oracles",
+      "description": "Once per battle round, you can change the value showing on 1 Destiny Die to any value you wish.",
+      "effects": [
+        {
+          "description": "Change 1 Destiny Die value per round",
+          "targetTag": "",
+          "effect": "destinyManipulation",
+          "value": 1,
+          "condition": "always"
+        }
+      ]
+    }
+  ],
+  "heroicTraits": [
+    {
+      "name": "Arch-sorcerer",
+      "description": "This unit can attempt to cast 1 extra spell per hero phase.",
+      "type": "heroicTrait",
+      "effect": "extraCast",
+      "value": 1
+    },
+    {
+      "name": "Nexus of Fate",
+      "description": "At the start of each hero phase, gain 1 Destiny Die (roll a D6 and add it to the pool).",
+      "type": "heroicTrait",
+      "effect": "destinyGain",
+      "value": 1
+    },
+    {
+      "name": "Daemonic Spark",
+      "description": "+1 to wound rolls for this unit's melee attacks.",
+      "type": "heroicTrait",
+      "effect": "woundBonus",
+      "value": 1
+    }
+  ],
+  "artefacts": [
+    {
+      "name": "Amulet of Destiny",
+      "description": "This unit has Ward 5+.",
+      "type": "artefact",
+      "effect": "ward",
+      "value": 5
+    },
+    {
+      "name": "Wicked Shard",
+      "description": "Pick 1 of this unit's melee weapons. Add 1 to that weapon's Damage characteristic.",
+      "type": "artefact",
+      "effect": "extraDamage",
+      "value": 1
+    },
+    {
+      "name": "Timeslip Pendant",
+      "description": "After this unit fights, it can immediately make a 2D6\" move.",
+      "type": "artefact",
+      "effect": "fightAndFlee",
+      "value": 7
+    }
+  ],
   "warscrolls": [
     {
       "id": "tzeentch_kairos_fateweaver",
       "name": "Kairos Fateweaver",
+      "faction": "tzeentch",
       "points": 400,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 100,
       "keywords": ["Hero", "Monster", "Wizard", "Fly", "Daemon"],
+      "tags": ["Daemon"],
       "unique": true,
       "stats": {"move": 12, "save": 4, "control": 5, "health": 16},
       "weapons": [
@@ -78,11 +167,13 @@
     {
       "id": "tzeentch_lord_of_change",
       "name": "Lord of Change",
+      "faction": "tzeentch",
       "points": 380,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 100,
       "keywords": ["Hero", "Monster", "Wizard", "Fly", "Daemon"],
+      "tags": ["Daemon"],
       "unique": false,
       "stats": {"move": 12, "save": 4, "control": 5, "health": 14},
       "weapons": [
@@ -104,11 +195,13 @@
     {
       "id": "tzeentch_the_changeling",
       "name": "The Changeling",
+      "faction": "tzeentch",
       "points": 170,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 40,
       "keywords": ["Hero", "Infantry", "Wizard", "Daemon"],
+      "tags": ["Daemon"],
       "unique": true,
       "stats": {"move": 6, "save": 5, "control": 2, "health": 6},
       "weapons": [
@@ -128,11 +221,13 @@
     {
       "id": "tzeentch_magister_on_disc",
       "name": "Magister on Disc of Tzeentch",
+      "faction": "tzeentch",
       "points": 120,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 40,
       "keywords": ["Hero", "Cavalry", "Wizard", "Fly"],
+      "tags": ["Arcanite"],
       "unique": false,
       "stats": {"move": 12, "save": 5, "control": 2, "health": 6},
       "weapons": [
@@ -151,11 +246,13 @@
     {
       "id": "tzeentch_tzaangor_shaman",
       "name": "Tzaangor Shaman",
+      "faction": "tzeentch",
       "points": 100,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 40,
       "keywords": ["Hero", "Cavalry", "Wizard", "Fly"],
+      "tags": ["Arcanite", "Tzaangor"],
       "unique": false,
       "stats": {"move": 12, "save": 5, "control": 2, "health": 6},
       "weapons": [
@@ -175,11 +272,13 @@
     {
       "id": "tzeentch_curseling",
       "name": "Curseling, Eye of Tzeentch",
+      "faction": "tzeentch",
       "points": 150,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 40,
       "keywords": ["Hero", "Infantry", "Wizard"],
+      "tags": ["Arcanite"],
       "unique": true,
       "stats": {"move": 5, "save": 4, "control": 2, "health": 7},
       "weapons": [
@@ -199,11 +298,13 @@
     {
       "id": "tzeentch_gaunt_summoner",
       "name": "Gaunt Summoner of Tzeentch",
+      "faction": "tzeentch",
       "points": 120,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 40,
       "keywords": ["Hero", "Infantry", "Wizard", "Daemon"],
+      "tags": ["Daemon"],
       "unique": false,
       "stats": {"move": 5, "save": 5, "control": 2, "health": 6},
       "weapons": [
@@ -223,11 +324,13 @@
     {
       "id": "tzeentch_blue_scribes",
       "name": "The Blue Scribes",
+      "faction": "tzeentch",
       "points": 120,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 40,
       "keywords": ["Hero", "Cavalry", "Wizard", "Fly", "Daemon"],
+      "tags": ["Daemon"],
       "unique": true,
       "stats": {"move": 12, "save": 5, "control": 2, "health": 5},
       "weapons": [
@@ -247,11 +350,13 @@
     {
       "id": "tzeentch_ogroid_thaumaturge",
       "name": "Ogroid Thaumaturge",
+      "faction": "tzeentch",
       "points": 150,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 50,
       "keywords": ["Hero", "Infantry", "Wizard"],
+      "tags": ["Arcanite"],
       "unique": false,
       "stats": {"move": 6, "save": 4, "control": 2, "health": 8},
       "weapons": [
@@ -265,17 +370,19 @@
       ],
       "prayers": [],
       "abilities": [
-        {"name": "Mighty Rampage", "description": "After charging, this unit deals D3 mortal wounds to enemy units within 1\".", "phase": "charge", "effect": "impactMortals", "value": 2}
+        {"name": "Mighty Rampage", "description": "After charging, this unit deals D3 mortal wounds to enemy units within 1\".", "phase": "charge", "effect": "mortalOnCharge", "value": 2}
       ]
     },
     {
       "id": "tzeentch_pink_horrors",
       "name": "Pink Horrors of Tzeentch",
+      "faction": "tzeentch",
       "points": 130,
       "unitSize": 10,
       "maxSize": 20,
       "baseSizeMM": 32,
       "keywords": ["Infantry", "Daemon"],
+      "tags": ["Daemon", "Horror"],
       "unique": false,
       "stats": {"move": 5, "save": 5, "control": 1, "health": 1},
       "weapons": [
@@ -293,11 +400,13 @@
     {
       "id": "tzeentch_blue_horrors",
       "name": "Blue Horrors of Tzeentch",
+      "faction": "tzeentch",
       "points": 80,
       "unitSize": 10,
       "maxSize": 20,
       "baseSizeMM": 25,
       "keywords": ["Infantry", "Daemon"],
+      "tags": ["Daemon", "Horror"],
       "unique": false,
       "stats": {"move": 5, "save": 6, "control": 1, "health": 1},
       "weapons": [
@@ -315,11 +424,13 @@
     {
       "id": "tzeentch_brimstone_horrors",
       "name": "Brimstone Horrors of Tzeentch",
+      "faction": "tzeentch",
       "points": 60,
       "unitSize": 10,
       "maxSize": 20,
       "baseSizeMM": 25,
       "keywords": ["Infantry", "Daemon"],
+      "tags": ["Daemon", "Horror"],
       "unique": false,
       "stats": {"move": 5, "save": 6, "control": 1, "health": 1},
       "weapons": [
@@ -335,11 +446,13 @@
     {
       "id": "tzeentch_flamers",
       "name": "Flamers of Tzeentch",
+      "faction": "tzeentch",
       "points": 140,
       "unitSize": 3,
       "maxSize": 6,
       "baseSizeMM": 32,
       "keywords": ["Infantry", "Daemon", "Fly"],
+      "tags": ["Daemon", "Flamer"],
       "unique": false,
       "stats": {"move": 9, "save": 5, "control": 1, "health": 3},
       "weapons": [
@@ -357,11 +470,13 @@
     {
       "id": "tzeentch_exalted_flamers",
       "name": "Exalted Flamers of Tzeentch",
+      "faction": "tzeentch",
       "points": 100,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 75,
       "keywords": ["Cavalry", "Daemon", "Fly"],
+      "tags": ["Daemon", "Flamer"],
       "unique": false,
       "stats": {"move": 12, "save": 5, "control": 2, "health": 4},
       "weapons": [
@@ -377,11 +492,13 @@
     {
       "id": "tzeentch_screamers",
       "name": "Screamers of Tzeentch",
+      "faction": "tzeentch",
       "points": 100,
       "unitSize": 3,
       "maxSize": 6,
       "baseSizeMM": 32,
       "keywords": ["Cavalry", "Daemon", "Fly"],
+      "tags": ["Daemon"],
       "unique": false,
       "stats": {"move": 12, "save": 5, "control": 1, "health": 3},
       "weapons": [
@@ -398,11 +515,13 @@
     {
       "id": "tzeentch_kairic_acolytes",
       "name": "Kairic Acolytes",
+      "faction": "tzeentch",
       "points": 110,
       "unitSize": 10,
       "maxSize": 20,
       "baseSizeMM": 32,
       "keywords": ["Infantry"],
+      "tags": ["Arcanite"],
       "unique": false,
       "stats": {"move": 6, "save": 5, "control": 1, "health": 1},
       "weapons": [
@@ -420,11 +539,13 @@
     {
       "id": "tzeentch_tzaangors",
       "name": "Tzaangors",
+      "faction": "tzeentch",
       "points": 100,
       "unitSize": 10,
       "maxSize": 20,
       "baseSizeMM": 32,
       "keywords": ["Infantry"],
+      "tags": ["Arcanite", "Tzaangor"],
       "unique": false,
       "stats": {"move": 6, "save": 5, "control": 1, "health": 1},
       "weapons": [
@@ -442,11 +563,13 @@
     {
       "id": "tzeentch_tzaangor_enlightened",
       "name": "Tzaangor Enlightened",
+      "faction": "tzeentch",
       "points": 120,
       "unitSize": 3,
       "maxSize": 6,
       "baseSizeMM": 40,
       "keywords": ["Cavalry", "Fly"],
+      "tags": ["Arcanite", "Tzaangor"],
       "unique": false,
       "stats": {"move": 12, "save": 5, "control": 1, "health": 3},
       "weapons": [

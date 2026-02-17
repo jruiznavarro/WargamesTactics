@@ -25,7 +25,11 @@ const (
 	OnPhaseStart // Start of any phase
 	OnPhaseEnd   // End of any phase
 
+	// Ward save trigger
+	BeforeWardSave // Modify ward save value dynamically
+
 	// Game event triggers
-	OnModelSlain  // When a model is killed
+	OnModelSlain    // When a model is killed
 	OnUnitDestroyed // When a unit is fully destroyed
+	OnBattleRoundStart // When a new battle round begins
 )

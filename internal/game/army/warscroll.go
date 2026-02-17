@@ -13,6 +13,7 @@ type Warscroll struct {
 	MaxSize      int               `json:"maxSize"`       // Reinforced size (0 = cannot reinforce)
 	BaseSizeMM   int               `json:"baseSizeMM"`    // Base diameter in millimeters
 	Keywords     []string          `json:"keywords"`      // Unit keywords (Hero, Infantry, etc.)
+	Tags         []string          `json:"tags"`          // Faction sub-keywords (Saurus, Skink, Daemon, etc.)
 	Stats        WarscrollStats    `json:"stats"`         // Core stats
 	Weapons      []WarscrollWeapon `json:"weapons"`       // Weapon profiles
 	WardSave     int               `json:"wardSave"`      // Ward save (0 = none)

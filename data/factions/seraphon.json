@@ -4,18 +4,25 @@
   "grandAlliance": "Order",
   "battleTraits": [
     {
-      "name": "Celestial Perfection",
-      "description": "Seraphon units have Ward 6+ while wholly within 12\" of a friendly Seraphon Hero.",
+      "name": "Scaly Skin",
+      "description": "SAURUS units have Ward 6+.",
       "phase": "passive",
-      "effect": "conditionalWard",
+      "effect": "saurusWard",
       "value": 6
     },
     {
-      "name": "Saurian Savagery",
-      "description": "Once per battle round, a Seraphon unit can reroll one hit roll.",
-      "phase": "passive",
-      "effect": "rerollHit",
+      "name": "Predatory Fighters",
+      "description": "Each time a friendly SAURUS unit completes a charge move, add 1 to the Attacks characteristic of that unit's melee weapons until the end of the turn.",
+      "phase": "combat",
+      "effect": "chargeAttackBonus",
       "value": 1
+    },
+    {
+      "name": "Cold-blooded",
+      "description": "Friendly SERAPHON units wholly within 12\" of a friendly SERAPHON HERO ignore negative modifiers to characteristics.",
+      "phase": "passive",
+      "effect": "ignoreNegativeMods",
+      "value": 12
     }
   ],
   "spellLore": [
@@ -24,7 +31,7 @@
       "castingValue": 8,
       "range": 18,
       "effect": "damage",
-      "effectValue": 3,
+      "effectValue": 4,
       "targetAlly": false,
       "unlimited": false
     },
@@ -67,15 +74,104 @@
       "unlimited": false
     }
   ],
+  "formations": [
+    {
+      "name": "Sunclaw Temple-host",
+      "description": "Each time a friendly SAURUS unit completes a charge move, add 1 to the Rend characteristic of that unit's melee weapons until the end of the turn.",
+      "effects": [
+        {
+          "description": "+1 Rend for Saurus melee weapons on charge turn",
+          "targetTag": "Saurus",
+          "effect": "chargeRendBonus",
+          "value": 1,
+          "condition": "charged"
+        }
+      ]
+    },
+    {
+      "name": "Starborne Host",
+      "description": "Friendly SERAPHON units that are wholly within 12\" of a friendly SERAPHON WIZARD have Ward 6+.",
+      "effects": [
+        {
+          "description": "Ward 6+ when near a friendly Wizard",
+          "targetTag": "",
+          "effect": "wardNearWizard",
+          "value": 6,
+          "condition": "nearWizard"
+        }
+      ]
+    },
+    {
+      "name": "Shadowstrike Starhost",
+      "description": "Friendly SKINK units can be set up in reserve and arrive more than 9\" from enemy units. +1 to charge rolls for SKINK units.",
+      "effects": [
+        {
+          "description": "+1 to charge rolls for Skink units",
+          "targetTag": "Skink",
+          "effect": "chargeBonus",
+          "value": 1,
+          "condition": "always"
+        }
+      ]
+    }
+  ],
+  "heroicTraits": [
+    {
+      "name": "Dominating Mind",
+      "description": "Friendly SERAPHON units wholly within 12\" do not take battleshock tests.",
+      "type": "heroicTrait",
+      "effect": "noBattleshock",
+      "value": 12
+    },
+    {
+      "name": "Vengeful Defender",
+      "description": "+1 to wound rolls for this unit if any friendly units have been destroyed.",
+      "type": "heroicTrait",
+      "effect": "woundBonusOnLoss",
+      "value": 1
+    },
+    {
+      "name": "Disciplined Fury",
+      "description": "If this unit is destroyed in combat, it can fight immediately before being removed.",
+      "type": "heroicTrait",
+      "effect": "fightOnDeath",
+      "value": 0
+    }
+  ],
+  "artefacts": [
+    {
+      "name": "Serpent God Dagger",
+      "description": "Pick 1 of this unit's melee weapons. Add 1 to that weapon's Rend characteristic.",
+      "type": "artefact",
+      "effect": "extraRend",
+      "value": 1
+    },
+    {
+      "name": "Aetherquartz Brooch",
+      "description": "Each time an enemy WIZARD within 18\" successfully casts a spell, roll a D6. On a 4+, you receive 1 command point.",
+      "type": "artefact",
+      "effect": "cpOnEnemyCast",
+      "value": 1
+    },
+    {
+      "name": "Itxi Grubs",
+      "description": "At the start of your hero phase, heal D3 wounds allocated to this unit.",
+      "type": "artefact",
+      "effect": "healStart",
+      "value": 2
+    }
+  ],
   "warscrolls": [
     {
       "id": "seraphon_lord_kroak",
       "name": "Lord Kroak",
+      "faction": "seraphon",
       "points": 420,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 100,
       "keywords": ["Hero", "Monster", "Wizard", "Fly"],
+      "tags": ["Slann"],
       "unique": true,
       "stats": {"move": 8, "save": 4, "control": 5, "health": 18},
       "weapons": [
@@ -97,11 +193,13 @@
     {
       "id": "seraphon_slann_starmaster",
       "name": "Slann Starmaster",
+      "faction": "seraphon",
       "points": 260,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 50,
       "keywords": ["Hero", "Wizard"],
+      "tags": ["Slann"],
       "unique": false,
       "stats": {"move": 5, "save": 4, "control": 2, "health": 12},
       "weapons": [
@@ -114,18 +212,19 @@
       ],
       "prayers": [],
       "abilities": [
-        {"name": "Celestial Channelling", "description": "Friendly Seraphon Wizards wholly within 12\" get -1 to casting values.", "phase": "passive", "effect": "castingBonus", "value": 12},
-        {"name": "Contemplations of the Ancient Ones", "description": "Can use this ability in the Hero phase to see upcoming spells.", "phase": "hero", "effect": "scry", "value": 0}
+        {"name": "Celestial Channelling", "description": "Friendly Seraphon Wizards wholly within 12\" get -1 to casting values.", "phase": "passive", "effect": "castingBonus", "value": 12}
       ]
     },
     {
       "id": "seraphon_saurus_oldblood_on_carnosaur",
       "name": "Saurus Oldblood on Carnosaur",
+      "faction": "seraphon",
       "points": 280,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 120,
       "keywords": ["Hero", "Monster", "Cavalry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 10, "save": 4, "control": 5, "health": 14},
       "weapons": [
@@ -138,17 +237,19 @@
       "prayers": [],
       "abilities": [
         {"name": "Bloodroar", "description": "Enemy units within 12\" cannot use Rally.", "phase": "passive", "effect": "noRally", "value": 12},
-        {"name": "Terror", "description": "Enemy units in combat suffer -1 to hit.", "phase": "combat", "effect": "terror", "value": 1}
+        {"name": "Terror", "description": "Subtract 1 from hit rolls for attacks that target this unit.", "phase": "combat", "effect": "minusOneToBeHit", "value": 1}
       ]
     },
     {
       "id": "seraphon_saurus_scar_veteran_on_aggradon",
       "name": "Saurus Scar-Veteran on Aggradon",
+      "faction": "seraphon",
       "points": 150,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 75,
       "keywords": ["Hero", "Cavalry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 10, "save": 4, "control": 2, "health": 8},
       "weapons": [
@@ -166,11 +267,13 @@
     {
       "id": "seraphon_saurus_astrolith_bearer",
       "name": "Saurus Astrolith Bearer",
+      "faction": "seraphon",
       "points": 150,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 40,
       "keywords": ["Hero", "Infantry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 5, "save": 4, "control": 2, "health": 7},
       "weapons": [
@@ -188,11 +291,13 @@
     {
       "id": "seraphon_skink_starseer",
       "name": "Skink Starseer",
+      "faction": "seraphon",
       "points": 120,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 32,
       "keywords": ["Hero", "Wizard", "Infantry"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 5, "save": 5, "control": 2, "health": 5},
       "weapons": [
@@ -211,11 +316,13 @@
     {
       "id": "seraphon_skink_starpriest",
       "name": "Skink Starpriest",
+      "faction": "seraphon",
       "points": 100,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 32,
       "keywords": ["Hero", "Priest", "Infantry"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 5, "save": 5, "control": 2, "health": 5},
       "weapons": [
@@ -232,11 +339,13 @@
     {
       "id": "seraphon_skink_oracle_on_troglodon",
       "name": "Skink Oracle on Troglodon",
+      "faction": "seraphon",
       "points": 230,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 120,
       "keywords": ["Hero", "Monster", "Cavalry", "Wizard"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 10, "save": 4, "control": 5, "health": 12},
       "weapons": [
@@ -257,11 +366,13 @@
     {
       "id": "seraphon_saurus_warriors",
       "name": "Saurus Warriors",
+      "faction": "seraphon",
       "points": 120,
       "unitSize": 10,
       "maxSize": 20,
       "baseSizeMM": 32,
       "keywords": ["Infantry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 5, "save": 4, "control": 1, "health": 1},
       "weapons": [
@@ -278,11 +389,13 @@
     {
       "id": "seraphon_saurus_guard",
       "name": "Saurus Guard",
+      "faction": "seraphon",
       "points": 140,
       "unitSize": 5,
       "maxSize": 10,
       "baseSizeMM": 32,
       "keywords": ["Infantry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 5, "save": 4, "control": 1, "health": 2},
       "weapons": [
@@ -299,11 +412,13 @@
     {
       "id": "seraphon_skinks",
       "name": "Skinks",
+      "faction": "seraphon",
       "points": 80,
       "unitSize": 10,
       "maxSize": 20,
       "baseSizeMM": 25,
       "keywords": ["Infantry"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 8, "save": 6, "control": 1, "health": 1},
       "weapons": [
@@ -321,11 +436,13 @@
     {
       "id": "seraphon_kroxigor",
       "name": "Kroxigor",
+      "faction": "seraphon",
       "points": 150,
       "unitSize": 3,
       "maxSize": 6,
       "baseSizeMM": 50,
       "keywords": ["Infantry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 6, "save": 4, "control": 2, "health": 4},
       "weapons": [
@@ -342,11 +459,13 @@
     {
       "id": "seraphon_aggradon_lancers",
       "name": "Aggradon Lancers",
+      "faction": "seraphon",
       "points": 190,
       "unitSize": 3,
       "maxSize": 6,
       "baseSizeMM": 75,
       "keywords": ["Cavalry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 10, "save": 4, "control": 2, "health": 5},
       "weapons": [
@@ -364,11 +483,13 @@
     {
       "id": "seraphon_stegadon",
       "name": "Stegadon",
+      "faction": "seraphon",
       "points": 250,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 120,
       "keywords": ["Monster", "Cavalry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 8, "save": 4, "control": 5, "health": 12},
       "weapons": [
@@ -381,17 +502,19 @@
       "spells": [],
       "prayers": [],
       "abilities": [
-        {"name": "Unstoppable Stampede", "description": "D3 mortal wounds to enemy unit charged.", "phase": "charge", "effect": "impactMortals", "value": 2}
+        {"name": "Unstoppable Stampede", "description": "D3 mortal wounds to enemy unit charged.", "phase": "charge", "effect": "mortalOnCharge", "value": 2}
       ]
     },
     {
       "id": "seraphon_bastiladon",
       "name": "Bastiladon",
+      "faction": "seraphon",
       "points": 210,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 120,
       "keywords": ["Monster", "Cavalry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 5, "save": 3, "control": 5, "health": 12},
       "weapons": [
@@ -409,11 +532,13 @@
     {
       "id": "seraphon_raptadon_hunters",
       "name": "Raptadon Hunters",
+      "faction": "seraphon",
       "points": 100,
       "unitSize": 5,
       "maxSize": 10,
       "baseSizeMM": 75,
       "keywords": ["Cavalry"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 12, "save": 5, "control": 1, "health": 3},
       "weapons": [
@@ -429,11 +554,13 @@
     {
       "id": "seraphon_raptadon_chargers",
       "name": "Raptadon Chargers",
+      "faction": "seraphon",
       "points": 120,
       "unitSize": 5,
       "maxSize": 10,
       "baseSizeMM": 75,
       "keywords": ["Cavalry"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 12, "save": 5, "control": 1, "health": 3},
       "weapons": [
@@ -449,11 +576,13 @@
     {
       "id": "seraphon_terrawings",
       "name": "Terrawings",
+      "faction": "seraphon",
       "points": 80,
       "unitSize": 3,
       "maxSize": 6,
       "baseSizeMM": 50,
       "keywords": ["Infantry", "Fly"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 12, "save": 6, "control": 1, "health": 3},
       "weapons": [
@@ -468,11 +597,13 @@
     {
       "id": "seraphon_hunters_of_huanchi",
       "name": "Hunters of Huanchi",
+      "faction": "seraphon",
       "points": 70,
       "unitSize": 5,
       "maxSize": 10,
       "baseSizeMM": 25,
       "keywords": ["Infantry"],
+      "tags": ["Skink"],
       "unique": false,
       "stats": {"move": 8, "save": 6, "control": 1, "health": 1},
       "weapons": [
@@ -490,11 +621,13 @@
     {
       "id": "seraphon_spawn_of_chotec",
       "name": "Spawn of Chotec",
+      "faction": "seraphon",
       "points": 250,
       "unitSize": 1,
       "maxSize": 0,
       "baseSizeMM": 120,
       "keywords": ["Monster", "Cavalry"],
+      "tags": ["Saurus"],
       "unique": false,
       "stats": {"move": 10, "save": 4, "control": 5, "health": 10},
       "weapons": [

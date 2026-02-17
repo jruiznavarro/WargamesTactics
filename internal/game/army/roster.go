@@ -23,9 +23,13 @@ type RosterEntry struct {
 
 // ArmyRoster represents a complete army list for one player.
 type ArmyRoster struct {
-	FactionID   string        `json:"factionId"`   // Faction this army belongs to
-	Entries     []RosterEntry `json:"entries"`      // Unit selections
-	PointsLimit int           `json:"pointsLimit"`  // Max points (default 2000)
+	FactionID      string        `json:"factionId"`      // Faction this army belongs to
+	Entries        []RosterEntry `json:"entries"`         // Unit selections
+	PointsLimit    int           `json:"pointsLimit"`     // Max points (default 2000)
+	FormationIndex int           `json:"formationIndex"`  // Selected battle formation (index into Faction.Formations)
+	HeroicTraitIdx int           `json:"heroicTraitIdx"`  // Selected heroic trait index (-1 = none)
+	ArtefactIdx    int           `json:"artefactIdx"`     // Selected artefact index (-1 = none)
+	ArtefactUnitID string        `json:"artefactUnitId"`  // Warscroll ID of the hero receiving the artefact
 }
 
 // Validate checks the roster against matched play composition rules.
@@ -181,10 +185,13 @@ func (s *UnitSpec) ToUnitParams() (name string, ownerID int, stats core.Stats, w
 func (s *UnitSpec) ApplyToUnit(u *core.Unit) {
 	ws := s.Warscroll
 	u.Keywords = ws.ToCoreKeywords()
+	u.FactionKeyword = ws.Faction
+	u.Tags = append([]string{}, ws.Tags...)
 	u.WardSave = ws.WardSave
 	u.PowerLevel = ws.PowerLevel
 	u.Spells = ws.ToCoreSpells()
 	u.Prayers = ws.ToCorePrayers()
+	u.IsGeneral = s.IsGeneral
 
 	// Apply ability effects
 	for _, ab := range ws.Abilities {
@@ -198,5 +205,35 @@ func (s *UnitSpec) ApplyToUnit(u *core.Unit) {
 		case "strikeLast":
 			u.StrikeOrder = core.StrikeLast
 		}
+	}
+}
+
+// ApplyEnhancement applies a selected enhancement effect to a hero unit.
+func ApplyEnhancement(u *core.Unit, enh *Enhancement) {
+	switch enh.Effect {
+	case "ward":
+		if enh.Value > 0 && (u.WardSave == 0 || enh.Value < u.WardSave) {
+			u.WardSave = enh.Value
+		}
+	case "extraAttacks":
+		for i := range u.Weapons {
+			if u.Weapons[i].IsMelee() {
+				u.Weapons[i].Attacks += enh.Value
+			}
+		}
+	case "extraRend":
+		for i := range u.Weapons {
+			if u.Weapons[i].IsMelee() {
+				u.Weapons[i].Rend += enh.Value
+			}
+		}
+	case "extraDamage":
+		for i := range u.Weapons {
+			if u.Weapons[i].IsMelee() {
+				u.Weapons[i].Damage += enh.Value
+			}
+		}
+	case "extraCast":
+		u.PowerLevel += enh.Value
 	}
 }
