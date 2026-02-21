@@ -59,7 +59,23 @@ func (a *AIPlayer) decideMovement(view *game.GameView) interface{} {
 
 		origin := core.Position{X: u.Position[0], Y: u.Position[1]}
 		target := core.Position{X: nearest.Position[0], Y: nearest.Position[1]}
-		dest := origin.Towards(target, float64(u.MoveSpeed))
+		dist := core.Distance(origin, target)
+
+		// Cannot end a normal move within 3" of an enemy (Rule 14.1).
+		// If we would end up too close, stop at 3.1" away instead.
+		// If already within 3", skip this unit (it will need to charge).
+		const safeDistance = 3.1
+		moveAllowance := float64(u.MoveSpeed)
+		if dist <= safeDistance {
+			// Already within engagement range, no valid normal move
+			continue
+		}
+		if dist-moveAllowance < safeDistance {
+			// Clamp so we stop just outside 3"
+			moveAllowance = dist - safeDistance
+		}
+
+		dest := origin.Towards(target, moveAllowance)
 
 		return &command.MoveCommand{
 			OwnerID:     a.id,

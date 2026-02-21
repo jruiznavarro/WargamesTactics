@@ -1317,6 +1317,9 @@ func (g *Game) runPlayerPhase(playerIdx int, p phase.Phase) {
 	player := g.Players[playerIdx]
 	g.ActivePlayer = playerIdx
 
+	const maxConsecutiveErrors = 3
+	consecutiveErrors := 0
+
 	for {
 		view := g.View(player.ID())
 		cmd := player.GetNextCommand(view, p)
@@ -1332,8 +1335,14 @@ func (g *Game) runPlayerPhase(playerIdx int, p phase.Phase) {
 		result, err := g.ExecuteCommand(cmd)
 		if err != nil {
 			g.Logf("    Error: %s", err.Error())
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				g.Logf("    Too many consecutive errors, ending phase")
+				break
+			}
 			continue
 		}
+		consecutiveErrors = 0
 		g.Logf("    %s", result.String())
 
 		g.CheckVictory()
