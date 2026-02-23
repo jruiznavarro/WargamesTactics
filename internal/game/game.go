@@ -479,6 +479,12 @@ func (g *Game) ExecuteCommand(cmd interface{}) (command.Result, error) {
 		return g.executeRally(c)
 	case *command.MagicalInterventionCommand:
 		return g.executeMagicalIntervention(c)
+	case *command.AllOutAttackCommand:
+		return g.executeAllOutAttack(c)
+	case *command.AllOutDefenceCommand:
+		return g.executeAllOutDefence(c)
+	case *command.SelectBattleTacticCommand:
+		return g.executeSelectBattleTactic(c)
 	case *command.EndPhaseCommand:
 		return command.Result{Description: "Phase ended", Success: true}, nil
 	default:
@@ -1940,6 +1946,38 @@ func (g *Game) ApplyAllOutDefence(playerID int, unitID core.UnitID) error {
 
 	g.Logf("    %s gains +1 to save rolls this phase", unit.Name)
 	return nil
+}
+
+// executeAllOutAttack handles AllOutAttackCommand from the command pipeline.
+func (g *Game) executeAllOutAttack(cmd *command.AllOutAttackCommand) (command.Result, error) {
+	if err := g.ApplyAllOutAttack(cmd.OwnerID, cmd.UnitID); err != nil {
+		return command.Result{}, err
+	}
+	unit := g.GetUnit(cmd.UnitID)
+	desc := fmt.Sprintf("%s gains +1 to hit rolls (All-out Attack)", unit.Name)
+	return command.Result{Description: desc, Success: true}, nil
+}
+
+// executeAllOutDefence handles AllOutDefenceCommand from the command pipeline.
+func (g *Game) executeAllOutDefence(cmd *command.AllOutDefenceCommand) (command.Result, error) {
+	if err := g.ApplyAllOutDefence(cmd.OwnerID, cmd.UnitID); err != nil {
+		return command.Result{}, err
+	}
+	unit := g.GetUnit(cmd.UnitID)
+	desc := fmt.Sprintf("%s gains +1 to save rolls (All-out Defence)", unit.Name)
+	return command.Result{Description: desc, Success: true}, nil
+}
+
+// executeSelectBattleTactic handles SelectBattleTacticCommand from the command pipeline.
+func (g *Game) executeSelectBattleTactic(cmd *command.SelectBattleTacticCommand) (command.Result, error) {
+	cardID := BattleTacticCardID(cmd.CardID)
+	tier := BattleTacticTier(cmd.Tier)
+	if err := g.SelectBattleTactic(cmd.OwnerID, cardID, tier); err != nil {
+		return command.Result{}, err
+	}
+	tracker := g.BattleTactics[cmd.OwnerID]
+	desc := fmt.Sprintf("Selected battle tactic: %s (%s)", tracker.ActiveTactic.Tactic.Name, tier)
+	return command.Result{Description: desc, Success: true}, nil
 }
 
 // ExecuteRedeploy performs the Redeploy command: unit moves up to D6" in enemy movement phase.
