@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jruiznavarro/wargamestactics/internal/game/board"
 	"github.com/jruiznavarro/wargamestactics/internal/game/core"
 	"github.com/jruiznavarro/wargamestactics/internal/ui"
+	"github.com/jruiznavarro/wargamestactics/internal/web"
 )
 
 func main() {
@@ -21,16 +23,11 @@ func main() {
 	dataDir := flag.String("data", "data/factions", "Path to faction data directory")
 	faction1 := flag.String("p1faction", "", "Player 1 faction (e.g. seraphon)")
 	faction2 := flag.String("p2faction", "", "Player 2 faction (e.g. tzeentch)")
+	webMode := flag.Bool("web", false, "Start web UI server instead of CLI")
+	webAddr := flag.String("addr", ":8080", "Web server listen address (e.g. :8080)")
 	flag.Parse()
 
-	if *seed == 0 {
-		*seed = time.Now().UnixNano()
-	}
-
-	fmt.Println("=== AOS Battle Simulator ===")
-	fmt.Printf("Mode: %s | Seed: %d | Max Rounds: %d\n\n", *mode, *seed, *rounds)
-
-	// Load factions if data directory exists
+	// Load factions
 	registry := army.NewRegistry()
 	if _, err := os.Stat(*dataDir); err == nil {
 		if err := registry.LoadAllFactions(*dataDir); err != nil {
@@ -42,6 +39,21 @@ func main() {
 			}
 		}
 	}
+
+	// Web mode: start HTTP server with WebSocket support
+	if *webMode {
+		fmt.Println("=== AoS Battle Simulator — Web UI ===")
+		srv := web.NewServer(registry, *dataDir)
+		log.Fatal(srv.ListenAndServe(*webAddr))
+		return
+	}
+
+	if *seed == 0 {
+		*seed = time.Now().UnixNano()
+	}
+
+	fmt.Println("=== AOS Battle Simulator ===")
+	fmt.Printf("Mode: %s | Seed: %d | Max Rounds: %d\n\n", *mode, *seed, *rounds)
 
 	// Use battleplan if factions are loaded
 	useFactions := *faction1 != "" && *faction2 != ""

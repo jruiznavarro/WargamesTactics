@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AoS Battle Simulator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Setup Screen -->
+    <div id="setup-screen" class="screen active">
+        <div class="setup-container">
+            <h1>Age of Sigmar 4</h1>
+            <h2>Battle Simulator</h2>
+            <div class="setup-form">
+                <div class="form-group">
+                    <label for="mode">Modo de juego</label>
+                    <select id="mode">
+                        <option value="aivai">AI vs AI (Observar)</option>
+                        <option value="pvai">Jugador vs AI</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="faction1">Jugador 1 / Facci&oacute;n</label>
+                    <select id="faction1"></select>
+                </div>
+                <div class="form-group">
+                    <label for="faction2">Jugador 2 / Facci&oacute;n</label>
+                    <select id="faction2"></select>
+                </div>
+                <div class="form-group">
+                    <label for="seed">Seed (0 = aleatorio)</label>
+                    <input type="number" id="seed" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="rounds">Rondas m&aacute;x.</label>
+                    <input type="number" id="rounds" value="5" min="1" max="10">
+                </div>
+                <button id="btn-start" class="btn-primary">Iniciar Batalla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen">
+        <div class="game-layout">
+            <!-- Top Bar -->
+            <div class="top-bar">
+                <div class="round-info">
+                    <span id="round-label">Ronda 0</span>
+                    <span id="phase-label">-</span>
+                </div>
+                <div class="score-info">
+                    <span class="p1-score">P1: <span id="vp1">0</span> VP | <span id="cp1">0</span> CP</span>
+                    <span class="p2-score">P2: <span id="vp2">0</span> VP | <span id="cp2">0</span> CP</span>
+                </div>
+                <div class="faction-info">
+                    <span id="faction1-name">-</span> vs <span id="faction2-name">-</span>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Battlefield Canvas -->
+                <div class="battlefield-container">
+                    <canvas id="battlefield" width="960" height="540"></canvas>
+                    <div id="unit-tooltip" class="tooltip hidden"></div>
+                </div>
+
+                <!-- Side Panel -->
+                <div class="side-panel">
+                    <!-- Unit Info -->
+                    <div id="unit-info" class="panel">
+                        <h3>Unidad Seleccionada</h3>
+                        <div id="unit-details">
+                            <p class="placeholder">Haz clic en una unidad</p>
+                        </div>
+                    </div>
+
+                    <!-- Command Panel (only in PvAI) -->
+                    <div id="command-panel" class="panel hidden">
+                        <h3>Comandos</h3>
+                        <div id="command-buttons"></div>
+                    </div>
+
+                    <!-- Battle Log -->
+                    <div class="panel log-panel">
+                        <h3>Registro de Batalla</h3>
+                        <div id="battle-log"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div id="game-over" class="overlay hidden">
+        <div class="overlay-content">
+            <h2 id="game-over-title">Fin de la Batalla</h2>
+            <p id="game-over-message"></p>
+            <div id="game-over-scores"></div>
+            <button id="btn-new-game" class="btn-primary">Nueva Batalla</button>
+        </div>
+    </div>
+
+    <script src="js/ws.js"></script>
+    <script src="js/canvas.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

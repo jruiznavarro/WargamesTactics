@@ -1,0 +1,366 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    overflow: hidden;
+    height: 100vh;
+}
+
+.screen {
+    display: none;
+    width: 100%;
+    height: 100vh;
+}
+.screen.active {
+    display: flex;
+}
+
+/* ===== Setup Screen ===== */
+.setup-container {
+    margin: auto;
+    text-align: center;
+    background: #16213e;
+    padding: 40px 60px;
+    border-radius: 12px;
+    border: 1px solid #0f3460;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.setup-container h1 {
+    font-size: 2.2em;
+    color: #e94560;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+.setup-container h2 {
+    font-size: 1.1em;
+    color: #7a7a9e;
+    margin-bottom: 30px;
+    font-weight: normal;
+}
+.setup-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 320px;
+}
+.form-group {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+}
+.form-group label {
+    font-size: 0.85em;
+    color: #9a9abf;
+    margin-bottom: 4px;
+}
+.form-group select,
+.form-group input {
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid #0f3460;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-size: 1em;
+}
+.form-group select:focus,
+.form-group input:focus {
+    outline: none;
+    border-color: #e94560;
+}
+
+.btn-primary {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    background: #e94560;
+    color: white;
+    font-size: 1.1em;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: background 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.btn-primary:hover {
+    background: #c73650;
+}
+.btn-primary:disabled {
+    background: #555;
+    cursor: not-allowed;
+}
+
+/* ===== Game Screen ===== */
+.game-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+}
+
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #16213e;
+    padding: 8px 20px;
+    border-bottom: 2px solid #0f3460;
+    flex-shrink: 0;
+}
+.round-info {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+#round-label {
+    font-weight: bold;
+    font-size: 1.2em;
+    color: #e94560;
+}
+#phase-label {
+    font-size: 1em;
+    color: #7a7a9e;
+    padding: 2px 10px;
+    background: #1a1a2e;
+    border-radius: 4px;
+}
+.score-info {
+    display: flex;
+    gap: 24px;
+    font-size: 1em;
+}
+.p1-score { color: #4fc3f7; }
+.p2-score { color: #ef5350; }
+.faction-info {
+    color: #9a9abf;
+    font-size: 0.9em;
+}
+
+.main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ===== Battlefield ===== */
+.battlefield-container {
+    flex: 1;
+    position: relative;
+    background: #111;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#battlefield {
+    border: 2px solid #0f3460;
+    cursor: crosshair;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.tooltip {
+    position: absolute;
+    background: rgba(22, 33, 62, 0.95);
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.85em;
+    pointer-events: none;
+    z-index: 100;
+    max-width: 250px;
+}
+.tooltip.hidden { display: none; }
+
+/* ===== Side Panel ===== */
+.side-panel {
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    background: #16213e;
+    border-left: 2px solid #0f3460;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.panel {
+    padding: 12px;
+    border-bottom: 1px solid #0f3460;
+}
+.panel h3 {
+    font-size: 0.95em;
+    color: #e94560;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.placeholder {
+    color: #555;
+    font-style: italic;
+}
+
+/* Unit Details */
+#unit-details .unit-card {
+    background: #1a1a2e;
+    border-radius: 6px;
+    padding: 10px;
+}
+.unit-card .unit-name {
+    font-weight: bold;
+    font-size: 1.1em;
+    margin-bottom: 4px;
+}
+.unit-card .unit-name.player1 { color: #4fc3f7; }
+.unit-card .unit-name.player2 { color: #ef5350; }
+.unit-card .stat-row {
+    display: flex;
+    gap: 12px;
+    margin: 4px 0;
+    font-size: 0.85em;
+}
+.unit-card .stat-row span { color: #9a9abf; }
+.unit-card .stat-row strong { color: #e0e0e0; }
+.unit-card .health-bar {
+    height: 6px;
+    background: #333;
+    border-radius: 3px;
+    margin: 6px 0;
+    overflow: hidden;
+}
+.unit-card .health-bar .fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+.unit-card .weapon-list {
+    font-size: 0.8em;
+    margin-top: 6px;
+}
+.unit-card .weapon-item {
+    color: #9a9abf;
+    padding: 2px 0;
+}
+.unit-card .status-flags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+.unit-card .flag {
+    font-size: 0.7em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #0f3460;
+    color: #7a7a9e;
+}
+.unit-card .flag.active {
+    background: #e94560;
+    color: white;
+}
+
+/* Command Panel */
+#command-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.cmd-btn {
+    padding: 6px 12px;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.cmd-btn:hover {
+    background: #0f3460;
+    border-color: #4fc3f7;
+}
+.cmd-btn.active {
+    background: #e94560;
+    border-color: #e94560;
+    color: white;
+}
+.cmd-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Battle Log */
+.log-panel {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+#battle-log {
+    flex: 1;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78em;
+    line-height: 1.4;
+    padding: 4px;
+    background: #111;
+    border-radius: 4px;
+}
+#battle-log .log-entry {
+    padding: 1px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+#battle-log .log-entry.round-header {
+    color: #e94560;
+    font-weight: bold;
+    margin-top: 6px;
+}
+#battle-log .log-entry.phase-header {
+    color: #4fc3f7;
+}
+
+/* ===== Game Over Overlay ===== */
+.overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+.overlay.hidden { display: none; }
+.overlay-content {
+    background: #16213e;
+    border: 2px solid #e94560;
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    max-width: 500px;
+}
+.overlay-content h2 {
+    color: #e94560;
+    font-size: 2em;
+    margin-bottom: 16px;
+}
+.overlay-content p {
+    font-size: 1.2em;
+    margin-bottom: 12px;
+}
+#game-over-scores {
+    font-size: 1.1em;
+    margin-bottom: 20px;
+    color: #9a9abf;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #111; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
